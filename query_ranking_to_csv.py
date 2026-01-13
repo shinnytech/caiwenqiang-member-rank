@@ -23,7 +23,7 @@ USERNAME = "chaos123"  # 填写你的快期账户邮箱
 PASSWORD = "123456"            # 填写你的快期账户密码
 
 # 【必填】合约代码
-SYMBOL = "SHFE.rb2605"  # 例如: SHFE.cu2109, DCE.m2109, CZCE.CF2109 等
+SYMBOL = "SHFE.rb2601"  # 例如: SHFE.cu2109, DCE.m2109, CZCE.CF2109 等
 
 # 【必填】查询天数
 DAYS = 100  # 返回最近N个交易日的数据，必须 >= 1s

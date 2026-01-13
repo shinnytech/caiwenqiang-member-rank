@@ -13,43 +13,99 @@
         <div class="header">
             <div class="header-content">
                 <h1>期货持仓数据分析</h1>
-                <div class="controls">
-                    <div class="control-group">
+                <div class="controls" id="header-controls">
+                    <div class="control-group" id="control-symbol">
                         <label for="symbol">合约代码:</label>
-                        <input type="text" id="symbol" placeholder="例如: SHFE.rb2605" value="SHFE.rb2605">
+                        <select id="symbol" onchange="onControlChange()">
+                            <!-- 合约选项将由JS动态加载 -->
+                        </select>
                     </div>
-                    <div class="control-group">
+                    <div class="control-group" id="control-date">
                         <label for="date">日期:</label>
-                        <input type="date" id="date">
+                        <input type="date" id="date" onchange="onControlChange()">
                     </div>
-                    <button class="btn-query" onclick="queryData()">查询</button>
+                    <div class="control-group" id="control-broker" style="display: none;">
+                        <label for="broker-select-header">期货公司:</label>
+                        <select id="broker-select-header" onchange="onBrokerSelectChange()">
+                            <option value="">请选择期货公司</option>
+                            <!-- 期货公司选项将由JS动态加载 -->
+                        </select>
+                    </div>
+                    <button class="btn-query" id="btn-query" onclick="queryData()">查询</button>
                 </div>
             </div>
         </div>
-        <div class="content">
-            <!-- 分析图表区域 -->
-            <div id="analysis-charts" class="analysis-section">
-                <div class="analysis-chart-card">
-                    <div class="chart-header">
-                        <h2>合约多空持仓趋势 (近3个月)</h2>
-                    </div>
-                    <div class="chart-wrapper">
-                        <canvas id="trendChart"></canvas>
-                    </div>
+        <div class="main-layout">
+            <!-- 左侧导航栏 -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h3>导航菜单</h3>
                 </div>
-                <div class="analysis-table-card">
-                    <div class="chart-header">
-                        <h2>跨期净持仓数据表</h2>
+                <nav class="sidebar-nav">
+                    <a href="#" class="nav-item active" onclick="switchPage('rankings'); return false;" id="nav-rankings">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">持仓排行榜</span>
+                    </a>
+                    <a href="#" class="nav-item" onclick="switchPage('broker-detail'); return false;" id="nav-broker-detail">
+                        <span class="nav-icon">🏢</span>
+                        <span class="nav-text">公司持仓分析</span>
+                    </a>
+                </nav>
+            </div>
+            
+            <!-- 右侧内容区域 -->
+            <div class="content">
+                <!-- 第一个页面：持仓排行榜 -->
+                <div id="page-rankings" class="page-view">
+                <div id="rankings-container">
+                    <div class="loading">正在加载数据...</div>
+                </div>
+                
+                <!-- 分析图表区域 -->
+                <div id="analysis-charts" class="analysis-section">
+                    <div class="analysis-chart-card">
+                        <div class="chart-header">
+                            <h2>合约多空持仓趋势 (近3个月)</h2>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="trendChart"></canvas>
+                        </div>
                     </div>
-                    <div id="cross-period-table" class="table-wrapper">
-                        <div class="loading">正在加载数据...</div>
+                    <div class="analysis-table-card">
+                        <div class="chart-header">
+                            <h2>跨期净持仓数据表</h2>
+                        </div>
+                        <div id="cross-period-table" class="table-wrapper">
+                            <div class="loading">正在加载数据...</div>
+                        </div>
                     </div>
                 </div>
             </div>
             
-            <!-- 排名数据区域 -->
-            <div id="rankings-container">
-                <div class="loading">正在加载数据...</div>
+            <!-- 第二个页面：公司持仓分析 -->
+            <div id="page-broker-detail" class="page-view" style="display: none;">
+                <div class="broker-detail-header">
+                    <h2 id="broker-detail-title">期货公司持仓分析</h2>
+                </div>
+                <div class="broker-detail-content">
+                    <div class="broker-chart-card">
+                        <div class="chart-header">
+                            <h2>持仓趋势图 (近3个月)</h2>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="brokerTrendChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="broker-chart-card">
+                        <div class="chart-header">
+                            <h2>跨期持仓分布图</h2>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="brokerCrossPeriodChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
             </div>
         </div>
     </div>

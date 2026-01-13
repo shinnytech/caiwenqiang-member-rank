@@ -195,20 +195,51 @@ function generateChartData(rankingData) {
     return chartData;
 }
 
-// 加载CSV数据（优化版）
+// CSV文件列表（可根据实际情况添加）
+const CSV_FILES = [
+    'SHFE_rb2601_2025-08-15_2026-01-13.csv',
+    'SHFE_rb2603_2025-08-14_2026-01-12.csv',
+    'SHFE_rb2605_2025-09-05_2026-01-12.csv'
+];
+
+// 加载CSV数据（优化版 - 支持多个文件）
 async function loadCSV() {
     try {
         const startTime = performance.now();
-        const response = await fetch('SHFE_rb2605_2025-09-05_2026-01-12.csv');
-        const text = await response.text();
+        allData = [];
         
-        // 使用优化的批量解析
-        allData = parseCSV(text);
+        // 并行加载所有CSV文件
+        const loadPromises = CSV_FILES.map(async (filename) => {
+            try {
+                const response = await fetch(filename);
+                if (!response.ok) {
+                    console.warn(`无法加载文件: ${filename}`);
+                    return [];
+                }
+                const text = await response.text();
+                const data = parseCSV(text);
+                console.log(`成功加载 ${filename}: ${data.length} 条记录`);
+                return data;
+            } catch (error) {
+                console.warn(`加载文件 ${filename} 失败:`, error);
+                return [];
+            }
+        });
+        
+        // 等待所有文件加载完成并合并数据
+        const allFileData = await Promise.all(loadPromises);
+        allData = allFileData.flat(); // 合并所有数组
         
         // 设置默认日期为最新日期（优化：使用Set去重更快）
         const dateSet = new Set();
+        const symbolSet = new Set();
         for (let i = 0, len = allData.length; i < len; i++) {
-            dateSet.add(allData[i].datetime);
+            if (allData[i].datetime) {
+                dateSet.add(allData[i].datetime);
+            }
+            if (allData[i].symbol) {
+                symbolSet.add(allData[i].symbol);
+            }
         }
         const dates = Array.from(dateSet).sort().reverse();
         
@@ -218,8 +249,14 @@ async function loadCSV() {
             document.getElementById('date').value = formattedDate;
         }
         
+        // 动态加载合约列表
+        populateSymbolSelect(Array.from(symbolSet).sort());
+        
+        // 填充期货公司选择器
+        populateBrokerSelect();
+        
         const loadTime = performance.now() - startTime;
-        console.log(`数据加载完成，耗时: ${loadTime.toFixed(2)}ms，共 ${allData.length} 条记录`);
+        console.log(`数据加载完成，耗时: ${loadTime.toFixed(2)}ms，共 ${allData.length} 条记录，${symbolSet.size} 个合约`);
         
         queryData();
     } catch (error) {
@@ -229,22 +266,69 @@ async function loadCSV() {
     }
 }
 
+// 动态填充合约选择器
+function populateSymbolSelect(symbols) {
+    const select = document.getElementById('symbol');
+    // 清空选择器
+    select.innerHTML = '';
+    
+    // 添加所有合约选项
+    symbols.forEach(symbol => {
+        const option = document.createElement('option');
+        option.value = symbol;
+        option.textContent = symbol;
+        select.appendChild(option);
+    });
+    
+    // 默认选择第一个合约
+    if (symbols.length > 0) {
+        select.value = symbols[0];
+    }
+}
+
 // 查询数据
 function queryData() {
     const symbol = document.getElementById('symbol').value.trim();
-    const dateInput = document.getElementById('date').value;
+    let dateInput = document.getElementById('date').value;
     
-    if (!dateInput) {
-        alert('请选择日期');
+    if (!symbol) {
+        // 如果没有选择合约，不执行查询
         return;
+    }
+    
+    // 如果没有选择日期，或者选择的日期在当前合约中没有数据，自动选择该合约有数据的最新日期
+    if (!dateInput) {
+        dateInput = findLatestDateForSymbol(symbol);
+        if (dateInput) {
+            document.getElementById('date').value = dateInput;
+        } else {
+            document.getElementById('rankings-container').innerHTML = 
+                '<div class="error">该合约暂无数据</div>';
+            return;
+        }
+    } else {
+        // 检查选择的日期是否有数据
+        const dateStr = dateInput.replace(/-/g, '');
+        const hasData = allData.some(row => row.datetime === dateStr && row.symbol === symbol);
+        if (!hasData) {
+            // 如果选择的日期没有数据，自动切换到该合约有数据的最新日期
+            const latestDate = findLatestDateForSymbol(symbol);
+            if (latestDate) {
+                document.getElementById('date').value = latestDate;
+                dateInput = latestDate;
+            } else {
+                document.getElementById('rankings-container').innerHTML = 
+                    '<div class="error">该合约在选择的日期没有数据，请选择其他日期</div>';
+                return;
+            }
+        }
     }
     
     const dateStr = dateInput.replace(/-/g, '');
     
-    // 获取本日数据
+    // 获取本日数据，只显示选择的合约
     csvData = allData.filter(row => {
-        return row.datetime === dateStr && 
-               (!symbol || row.symbol === symbol);
+        return row.datetime === dateStr && row.symbol === symbol;
     });
     
     // 获取上日数据（用于对比）
@@ -253,18 +337,35 @@ function queryData() {
     const prevDateStr = dateObj.toISOString().slice(0, 10).replace(/-/g, '');
     
     csvDataPrev = allData.filter(row => {
-        return row.datetime === prevDateStr && 
-               (!symbol || row.symbol === symbol);
+        return row.datetime === prevDateStr && row.symbol === symbol;
     });
     
     if (csvData.length === 0) {
         document.getElementById('rankings-container').innerHTML = 
             '<div class="error">未找到指定日期和合约的数据</div>';
+        // 即使没有数据，也尝试渲染分析图表（可能跨期表格有数据）
+        renderAnalysisCharts();
         return;
     }
     
     renderRankings();
     renderAnalysisCharts();
+}
+
+// 查找指定合约有数据的最新日期
+function findLatestDateForSymbol(symbol) {
+    const dateSet = new Set();
+    for (let i = 0, len = allData.length; i < len; i++) {
+        if (allData[i].symbol === symbol && allData[i].datetime) {
+            dateSet.add(allData[i].datetime);
+        }
+    }
+    const dates = Array.from(dateSet).sort().reverse();
+    if (dates.length > 0) {
+        const latestDate = dates[0];
+        return `${latestDate.substring(0, 4)}-${latestDate.substring(4, 6)}-${latestDate.substring(6, 8)}`;
+    }
+    return null;
 }
 
 // 渲染排名（优化版）
@@ -574,7 +675,7 @@ function renderRankingCard(title, data, type, chartData, summary) {
         items += `
             <div class="ranking-item" data-rank="${rank}" data-name="${item.broker}" data-value="${item.value}" data-change="${change}">
                 <div class="rank-number ${rankClass}">${rank}</div>
-                <div class="broker-name">${item.broker}</div>
+                <div class="broker-name clickable" onclick="showBrokerDetail('${item.broker}')" title="点击查看详情">${item.broker}</div>
                 <div class="value-container">
                     <div class="value">${valueStr}</div>
                     ${changeIndicator}
@@ -685,6 +786,8 @@ function renderAnalysisCharts() {
 
 // 渲染趋势图（近3个月）
 function renderTrendChart(symbol) {
+    if (!symbol) return;
+    
     // 获取近3个月的数据
     const endDate = new Date();
     const startDate = new Date();
@@ -692,7 +795,7 @@ function renderTrendChart(symbol) {
     
     // 过滤数据：指定合约，近3个月
     const filteredData = allData.filter(row => {
-        if (symbol && row.symbol !== symbol) return false;
+        if (row.symbol !== symbol) return false;
         if (!row.datetime) return false;
         
         const rowDate = new Date(
@@ -1001,6 +1104,8 @@ function renderTrendChart(symbol) {
 
 // 渲染跨期净持仓表格
 function renderCrossPeriodTable(symbol) {
+    if (!symbol) return;
+    
     // 获取当前查询日期的数据
     const dateInput = document.getElementById('date').value;
     if (!dateInput) return;
@@ -1010,16 +1115,17 @@ function renderCrossPeriodTable(symbol) {
     // 获取指定日期的所有合约数据（按合约和期货公司去重）
     const contractBrokerMap = new Map();
     
+    // 提取品种代码（例如：SHFE.rb2605 -> rb）
+    const symbolParts = symbol.split('.');
+    const productCode = symbolParts.length > 1 ? symbolParts[1].substring(0, 2) : '';
+    
     allData.forEach(row => {
         // 只处理指定日期的数据
         if (row.datetime !== dateStr) return;
         
-        // 如果指定了symbol，只显示该品种的不同月份合约
-        if (symbol) {
-            const symbolParts = symbol.split('.');
-            if (symbolParts.length > 1 && !row.symbol.includes(symbolParts[1])) {
-                return;
-            }
+        // 只显示相同品种的合约（例如：rb2605, rb2603, rb2601 等）
+        if (productCode && !row.symbol.includes(productCode)) {
+            return;
         }
         
         const contractSymbol = row.symbol;
@@ -1103,7 +1209,16 @@ function renderCrossPeriodTable(symbol) {
             <tbody>
     `;
     
+    // 计算汇总数据
+    let totalNetLong = 0;
+    let totalNetShort = 0;
+    let totalPosition = 0;
+    
     tableData.forEach(item => {
+        totalNetLong += item.netLong;
+        totalNetShort += item.netShort;
+        totalPosition += item.totalPosition;
+        
         tableHTML += `
             <tr>
                 <td>${item.symbol}</td>
@@ -1114,12 +1229,422 @@ function renderCrossPeriodTable(symbol) {
         `;
     });
     
+    // 添加汇总行
     tableHTML += `
             </tbody>
+            <tfoot>
+                <tr class="summary-row">
+                    <td><strong>合计</strong></td>
+                    <td class="net-long"><strong>${totalNetLong > 0 ? totalNetLong.toLocaleString() : '-'}</strong></td>
+                    <td class="net-short"><strong>${totalNetShort > 0 ? totalNetShort.toLocaleString() : '-'}</strong></td>
+                    <td class="total-position"><strong>${totalPosition.toLocaleString()}</strong></td>
+                </tr>
+            </tfoot>
         </table>
     `;
     
     document.getElementById('cross-period-table').innerHTML = tableHTML;
+}
+
+// 页面切换函数
+function switchPage(pageType) {
+    const rankingsPage = document.getElementById('page-rankings');
+    const brokerDetailPage = document.getElementById('page-broker-detail');
+    const navRankings = document.getElementById('nav-rankings');
+    const navBrokerDetail = document.getElementById('nav-broker-detail');
+    
+    // 控制顶部控制栏的显示
+    const controlSymbol = document.getElementById('control-symbol');
+    const controlDate = document.getElementById('control-date');
+    const controlBroker = document.getElementById('control-broker');
+    const btnQuery = document.getElementById('btn-query');
+    
+    if (pageType === 'rankings') {
+        rankingsPage.style.display = 'block';
+        brokerDetailPage.style.display = 'none';
+        navRankings.classList.add('active');
+        navBrokerDetail.classList.remove('active');
+        
+        // 显示合约代码和日期，隐藏期货公司选择器和查询按钮
+        if (controlSymbol) controlSymbol.style.display = 'flex';
+        if (controlDate) controlDate.style.display = 'flex';
+        if (controlBroker) controlBroker.style.display = 'none';
+        if (btnQuery) btnQuery.style.display = 'block';
+    } else if (pageType === 'broker-detail') {
+        rankingsPage.style.display = 'none';
+        brokerDetailPage.style.display = 'block';
+        navRankings.classList.remove('active');
+        navBrokerDetail.classList.add('active');
+        
+        // 显示所有控制项（合约代码、日期、期货公司），隐藏查询按钮
+        if (controlSymbol) controlSymbol.style.display = 'flex';
+        if (controlDate) controlDate.style.display = 'flex';
+        if (controlBroker) controlBroker.style.display = 'flex';
+        if (btnQuery) btnQuery.style.display = 'none';
+        
+        // 如果已经选择了期货公司，自动更新图表
+        const brokerSelectHeader = document.getElementById('broker-select-header');
+        if (brokerSelectHeader && brokerSelectHeader.value) {
+            updateBrokerDetail(brokerSelectHeader.value);
+        }
+    }
+}
+
+// 填充期货公司选择器
+function populateBrokerSelect() {
+    const brokerSelectHeader = document.getElementById('broker-select-header');
+    if (!brokerSelectHeader) return;
+    
+    // 获取所有唯一的期货公司名称
+    const brokers = new Set();
+    allData.forEach(row => {
+        if (row.broker) {
+            brokers.add(row.broker);
+        }
+    });
+    
+    // 清空现有选项（保留第一个"请选择"选项）
+    brokerSelectHeader.innerHTML = '<option value="">请选择期货公司</option>';
+    
+    // 按字母顺序排序并添加选项
+    const sortedBrokers = Array.from(brokers).sort();
+    sortedBrokers.forEach(broker => {
+        const option = document.createElement('option');
+        option.value = broker;
+        option.textContent = broker;
+        brokerSelectHeader.appendChild(option);
+    });
+}
+
+// 期货公司选择器变化事件
+function onBrokerSelectChange() {
+    onControlChange();
+}
+
+// 更新期货公司详情页
+function updateBrokerDetail(brokerName) {
+    // 更新标题
+    document.getElementById('broker-detail-title').textContent = `${brokerName} - 持仓分析`;
+    
+    // 渲染图表
+    renderBrokerTrendChart(brokerName);
+    renderBrokerCrossPeriodChart(brokerName);
+}
+
+// 清空期货公司图表
+function clearBrokerCharts() {
+    const trendCanvas = document.getElementById('brokerTrendChart');
+    const crossPeriodCanvas = document.getElementById('brokerCrossPeriodChart');
+    
+    if (trendCanvas) {
+        const ctx = trendCanvas.getContext('2d');
+        ctx.clearRect(0, 0, trendCanvas.width, trendCanvas.height);
+        if (window.brokerTrendChartInstance) {
+            window.brokerTrendChartInstance.destroy();
+            window.brokerTrendChartInstance = null;
+        }
+    }
+    
+    if (crossPeriodCanvas) {
+        const ctx = crossPeriodCanvas.getContext('2d');
+        ctx.clearRect(0, 0, crossPeriodCanvas.width, crossPeriodCanvas.height);
+        if (window.brokerCrossPeriodChartInstance) {
+            window.brokerCrossPeriodChartInstance.destroy();
+            window.brokerCrossPeriodChartInstance = null;
+        }
+    }
+}
+
+// 控制项变化事件（合约代码、日期、期货公司）
+function onControlChange() {
+    // 检查当前在哪个页面
+    const brokerDetailPage = document.getElementById('page-broker-detail');
+    if (brokerDetailPage && brokerDetailPage.style.display !== 'none') {
+        // 在第二个页面，更新图表
+        const brokerSelectHeader = document.getElementById('broker-select-header');
+        if (brokerSelectHeader && brokerSelectHeader.value) {
+            updateBrokerDetail(brokerSelectHeader.value);
+        }
+    } else {
+        // 在第一个页面，更新排行榜数据
+        queryData();
+    }
+}
+
+// 页面切换：显示期货公司详情页（从第一个页面点击期货公司跳转）
+function showBrokerDetail(brokerName) {
+    // 获取当前的合约代码和日期
+    const symbol = document.getElementById('symbol').value;
+    const date = document.getElementById('date').value;
+    
+    // 切换到第二个页面
+    switchPage('broker-detail');
+    
+    // 设置控制项的值（保持合约代码和日期，设置期货公司）
+    if (symbol) {
+        document.getElementById('symbol').value = symbol;
+    }
+    if (date) {
+        document.getElementById('date').value = date;
+    }
+    
+    const brokerSelectHeader = document.getElementById('broker-select-header');
+    if (brokerSelectHeader) {
+        brokerSelectHeader.value = brokerName;
+        updateBrokerDetail(brokerName);
+    }
+}
+
+// 渲染期货公司持仓趋势图
+function renderBrokerTrendChart(brokerName) {
+    const canvas = document.getElementById('brokerTrendChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // 获取当前选中的合约和日期
+    const symbol = document.getElementById('symbol').value;
+    const date = document.getElementById('date').value;
+    
+    if (!symbol || !date) return;
+    
+    // 筛选该期货公司的数据（近3个月）
+    const endDate = new Date(date);
+    const startDate = new Date(endDate);
+    startDate.setMonth(startDate.getMonth() - 3);
+    
+    const brokerData = allData.filter(row => {
+        if (row.broker !== brokerName) return false;
+        if (row.symbol !== symbol) return false;
+        const rowDate = new Date(row.datetime);
+        return rowDate >= startDate && rowDate <= endDate;
+    });
+    
+    if (brokerData.length === 0) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+    
+    // 按日期排序
+    brokerData.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+    
+    // 准备图表数据
+    const labels = brokerData.map(row => {
+        const d = new Date(row.datetime);
+        return `${d.getMonth() + 1}-${d.getDate()}`;
+    });
+    
+    const longData = brokerData.map(row => parseFloat(row.long_oi) || 0);
+    const shortData = brokerData.map(row => parseFloat(row.short_oi) || 0);
+    const netData = brokerData.map(row => {
+        const long = parseFloat(row.long_oi) || 0;
+        const short = parseFloat(row.short_oi) || 0;
+        return long - short;
+    });
+    
+    // 销毁旧图表
+    if (window.brokerTrendChartInstance) {
+        window.brokerTrendChartInstance.destroy();
+    }
+    
+    // 创建新图表
+    window.brokerTrendChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '多头持仓',
+                    data: longData,
+                    borderColor: '#4facfe',
+                    backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                },
+                {
+                    label: '空头持仓',
+                    data: shortData,
+                    borderColor: '#43e97b',
+                    backgroundColor: 'rgba(67, 233, 123, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                },
+                {
+                    label: '净持仓',
+                    data: netData,
+                    borderColor: '#fee140',
+                    backgroundColor: 'rgba(254, 225, 64, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 2
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// 渲染期货公司跨期持仓分布图
+function renderBrokerCrossPeriodChart(brokerName) {
+    const canvas = document.getElementById('brokerCrossPeriodChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // 获取当前选中的日期
+    const date = document.getElementById('date').value;
+    if (!date) return;
+    
+    // 获取该期货公司在所有合约的数据（当前日期）
+    const brokerData = allData.filter(row => {
+        if (row.broker !== brokerName) return false;
+        return row.datetime === date;
+    });
+    
+    if (brokerData.length === 0) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        return;
+    }
+    
+    // 按合约分组
+    const contractMap = new Map();
+    brokerData.forEach(row => {
+        const contract = row.instrument_id || row.symbol.split('.').pop();
+        if (!contractMap.has(contract)) {
+            contractMap.set(contract, {
+                contract: contract,
+                long: 0,
+                short: 0
+            });
+        }
+        const data = contractMap.get(contract);
+        data.long += parseFloat(row.long_oi) || 0;
+        data.short += parseFloat(row.short_oi) || 0;
+    });
+    
+    // 转换为数组并按合约排序
+    const contracts = Array.from(contractMap.values()).sort((a, b) => {
+        // 提取数字部分进行排序
+        const numA = parseInt(a.contract.match(/\d+/)?.[0] || '0');
+        const numB = parseInt(b.contract.match(/\d+/)?.[0] || '0');
+        return numA - numB;
+    });
+    
+    // 准备图表数据
+    const labels = contracts.map(c => c.contract);
+    const longData = contracts.map(c => c.long);
+    const shortData = contracts.map(c => c.short);
+    
+    // 计算跨期持仓：本合约多头 vs 他月空头，本合约空头 vs 他月多头
+    const crossLongData = contracts.map((current, index) => {
+        // 本合约多头 vs 其他合约空头
+        let otherShort = 0;
+        contracts.forEach((other, otherIndex) => {
+            if (index !== otherIndex) {
+                otherShort += other.short;
+            }
+        });
+        return Math.min(current.long, otherShort);
+    });
+    
+    const crossShortData = contracts.map((current, index) => {
+        // 本合约空头 vs 其他合约多头
+        let otherLong = 0;
+        contracts.forEach((other, otherIndex) => {
+            if (index !== otherIndex) {
+                otherLong += other.long;
+            }
+        });
+        return Math.min(current.short, otherLong);
+    });
+    
+    // 销毁旧图表
+    if (window.brokerCrossPeriodChartInstance) {
+        window.brokerCrossPeriodChartInstance.destroy();
+    }
+    
+    // 创建新图表（横向柱状图）
+    window.brokerCrossPeriodChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: '本合约多头 vs 他月空头',
+                    data: crossLongData,
+                    backgroundColor: '#fa709a',
+                    borderColor: '#fa709a',
+                    borderWidth: 1
+                },
+                {
+                    label: '本合约空头 vs 他月多头',
+                    data: crossShortData,
+                    backgroundColor: '#43e97b',
+                    borderColor: '#43e97b',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            indexAxis: 'y', // 横向柱状图
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return context.dataset.label + ': ' + context.parsed.x.toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
 }
 
 // 页面加载时初始化
