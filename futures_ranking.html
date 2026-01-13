@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>期货持仓数据分析</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Chart.js 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <h1>期货持仓数据分析</h1>
+                <div class="controls">
+                    <div class="control-group">
+                        <label for="symbol">合约代码:</label>
+                        <input type="text" id="symbol" placeholder="例如: SHFE.rb2605" value="SHFE.rb2605">
+                    </div>
+                    <div class="control-group">
+                        <label for="date">日期:</label>
+                        <input type="date" id="date">
+                    </div>
+                    <button class="btn-query" onclick="queryData()">查询</button>
+                </div>
+            </div>
+        </div>
+        <div class="content">
+            <!-- 分析图表区域 -->
+            <div id="analysis-charts" class="analysis-section">
+                <div class="analysis-chart-card">
+                    <div class="chart-header">
+                        <h2>合约多空持仓趋势 (近3个月)</h2>
+                    </div>
+                    <div class="chart-wrapper">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+                <div class="analysis-table-card">
+                    <div class="chart-header">
+                        <h2>跨期净持仓数据表</h2>
+                    </div>
+                    <div id="cross-period-table" class="table-wrapper">
+                        <div class="loading">正在加载数据...</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 排名数据区域 -->
+            <div id="rankings-container">
+                <div class="loading">正在加载数据...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
