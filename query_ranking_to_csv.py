@@ -12,6 +12,7 @@
 from datetime import date, timedelta
 from tqsdk import TqApi, TqAuth
 import os
+import re
 import pandas as pd
 
 # ============================================================================
@@ -37,7 +38,7 @@ START_DT = None  # 例如: date(2024, 1, 1) 或 None（不填则自动计算上�
 # 【可选】期货公司名称
 # 如果填写，则只查询该期货公司的排名数据
 # 如果为 None，则返回所有期货公司的排名数据
-BROKER = None  # 例如: "海通期货" 或 None
+BROKER = "Z中信期货"  # 例如: "海通期货" 或 None
 
 # 【可选】输出CSV文件名（备用）
 # 文件名会自动生成格式：合约代码_开始日期_结束日期.csv
@@ -163,9 +164,14 @@ def main():
             start_date = date_series.min()
             end_date = date_series.max()
             
-            # 生成规范的文件名：合约代码_开始日期_结束日期.csv
+            # 生成规范的文件名：合约代码_开始日期_结束日期[_期货公司].csv
             symbol_clean = SYMBOL.replace('.', '_')  # 将点号替换为下划线，避免文件名问题
-            csv_filename = f"{symbol_clean}_{start_date}_{end_date}.csv"
+            broker_suffix = ""
+            if BROKER:
+                # 期货公司名称中可能包含不适合作为文件名的字符，这里做一次清洗
+                broker_clean = re.sub(r'[\\\\/:*?\"<>|\\s]+', '_', BROKER.strip())
+                broker_suffix = f"_{broker_clean}"
+            csv_filename = f"{symbol_clean}_{start_date}_{end_date}{broker_suffix}.csv"
         else:
             # 如果无法获取日期，使用默认文件名
             csv_filename = CSV_FILENAME

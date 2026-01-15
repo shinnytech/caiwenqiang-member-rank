@@ -1,7 +1,8 @@
 let csvData = [];
 let csvDataPrev = [];
-let allData = [];
-let trendChart = null; // 趋势图表实例
+let allData = [];          // 全市场合约+期货公司数据（用于持仓排行榜）
+let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
+let trendChart = null;     // 趋势图表实例
 
 // 饼状图颜色配置
 const chartColors = [
@@ -195,12 +196,33 @@ function generateChartData(rankingData) {
     return chartData;
 }
 
-// CSV文件列表（可根据实际情况添加）
+// CSV文件列表（合约维度的汇总数据，用于“持仓排行榜”页面）
+// 注意：这些文件是不带期货公司后缀的全市场数据
 const CSV_FILES = [
     'SHFE_rb2601_2025-08-15_2026-01-13.csv',
     'SHFE_rb2603_2025-08-14_2026-01-12.csv',
     'SHFE_rb2605_2025-09-05_2026-01-12.csv'
 ];
+
+// 根据当前合约和期货公司推导对应的“期货公司专用”CSV文件名
+// 约定：公司专用文件名 = 原合约汇总文件名去掉“.csv”后 + '_' + 清洗后的期货公司名 + '.csv'
+// 例如：SHFE_rb2605_2025-09-05_2026-01-12.csv + BROKER="Z中信期货"
+//      => SHFE_rb2605_2025-09-05_2026-01-12_Z中信期货.csv
+function getBrokerCsvFilename(symbol, brokerName) {
+    if (!symbol || !brokerName) return null;
+    
+    const symbolKey = symbol.replace('.', '_'); // SHFE.rb2605 -> SHFE_rb2605
+    // 找到与该合约匹配的基础汇总文件
+    const baseFile = CSV_FILES.find(f => f.startsWith(`${symbolKey}_`));
+    if (!baseFile) {
+        console.warn(`未找到合约 ${symbol} 对应的基础CSV文件，无法推导期货公司专用文件名`);
+        return null;
+    }
+    const baseName = baseFile.replace(/\.csv$/i, ''); // 去掉 .csv
+    // 清洗期货公司名称，去掉不适合文件名的字符
+    const brokerClean = brokerName.trim().replace(/[\\/:*?"<>|\s]+/g, '_');
+    return `${baseName}_${brokerClean}.csv`;
+}
 
 // 加载CSV数据（优化版 - 支持多个文件）
 async function loadCSV() {
@@ -1316,9 +1338,18 @@ function populateBrokerSelect() {
     });
 }
 
-// 期货公司选择器变化事件
-function onBrokerSelectChange() {
-    onControlChange();
+// 期货公司选择器变化事件（切换期货公司时，优先加载对应的专用CSV数据）
+async function onBrokerSelectChange() {
+    const brokerSelectHeader = document.getElementById('broker-select-header');
+    const brokerName = brokerSelectHeader ? brokerSelectHeader.value : '';
+    
+    if (brokerName) {
+        await loadBrokerDataForCurrentSelection(brokerName);
+        updateBrokerDetail(brokerName);
+    } else {
+        brokerDataAll = [];
+        clearBrokerCharts();
+    }
 }
 
 // 更新期货公司详情页
@@ -1371,11 +1402,45 @@ function onControlChange() {
     }
 }
 
+// 加载指定期货公司专用CSV数据（带期货公司后缀的文件）
+async function loadBrokerDataForCurrentSelection(brokerName) {
+    const symbol = document.getElementById('symbol').value;
+    if (!symbol || !brokerName) {
+        brokerDataAll = [];
+        return;
+    }
+    
+    const filename = getBrokerCsvFilename(symbol, brokerName);
+    if (!filename) {
+        console.warn(`未配置期货公司专用CSV文件: symbol=${symbol}, broker=${brokerName}`);
+        brokerDataAll = [];
+        return;
+    }
+    
+    try {
+        const resp = await fetch(encodeURI(filename));
+        if (!resp.ok) {
+            console.warn(`无法加载期货公司专用数据文件: ${filename}，状态码: ${resp.status}`);
+            brokerDataAll = [];
+            return;
+        }
+        const text = await resp.read ? await resp.read() : await resp.text();
+        brokerDataAll = parseCSV(text);
+        console.log(`已加载期货公司专用数据: ${filename}，记录数: ${brokerDataAll.length}`);
+    } catch (e) {
+        console.warn(`加载期货公司专用数据失败: ${filename}`, e);
+        brokerDataAll = [];
+    }
+}
+
 // 页面切换：显示期货公司详情页（从第一个页面点击期货公司跳转）
-function showBrokerDetail(brokerName) {
+async function showBrokerDetail(brokerName) {
     // 获取当前的合约代码和日期
     const symbol = document.getElementById('symbol').value;
     const date = document.getElementById('date').value;
+    
+    // 先加载该期货公司的专用CSV数据
+    await loadBrokerDataForCurrentSelection(brokerName);
     
     // 切换到第二个页面
     switchPage('broker-detail');
@@ -1395,7 +1460,7 @@ function showBrokerDetail(brokerName) {
     }
 }
 
-// 渲染期货公司持仓趋势图
+// 渲染期货公司持仓趋势图（优先使用期货公司专用CSV数据）
 function renderBrokerTrendChart(brokerName) {
     const canvas = document.getElementById('brokerTrendChart');
     if (!canvas) return;
@@ -1408,12 +1473,15 @@ function renderBrokerTrendChart(brokerName) {
     
     if (!symbol || !date) return;
     
+    // 选择数据源：如果已加载期货公司专用数据，则优先使用；否则回退到全量数据
+    const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
+    
     // 筛选该期货公司的数据（近3个月）
     const endDate = new Date(date);
     const startDate = new Date(endDate);
     startDate.setMonth(startDate.getMonth() - 3);
     
-    const brokerData = allData.filter(row => {
+    const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
         if (row.symbol !== symbol) return false;
         const rowDate = new Date(row.datetime);
@@ -1511,7 +1579,7 @@ function renderBrokerTrendChart(brokerName) {
     });
 }
 
-// 渲染期货公司跨期持仓分布图
+// 渲染期货公司跨期持仓分布图（优先使用期货公司专用CSV数据）
 function renderBrokerCrossPeriodChart(brokerName) {
     const canvas = document.getElementById('brokerCrossPeriodChart');
     if (!canvas) return;
@@ -1523,7 +1591,8 @@ function renderBrokerCrossPeriodChart(brokerName) {
     if (!date) return;
     
     // 获取该期货公司在所有合约的数据（当前日期）
-    const brokerData = allData.filter(row => {
+    const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
+    const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
         return row.datetime === date;
     });
