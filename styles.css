@@ -336,24 +336,8 @@ body {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
-    table-layout: fixed;
-}
-
-.cross-period-table th:first-child,
-.cross-period-table td:first-child {
-    width: 30%;
-}
-
-.cross-period-table th:nth-child(2),
-.cross-period-table td:nth-child(2),
-.cross-period-table th:nth-child(3),
-.cross-period-table td:nth-child(3) {
-    width: 20%;
-}
-
-.cross-period-table th:nth-child(4),
-.cross-period-table td:nth-child(4) {
-    width: 30%;
+    /* 让浏览器自动根据内容分配列宽，避免列宽固定导致合计行视觉不对齐 */
+    table-layout: auto;
 }
 
 .cross-period-table thead {
@@ -415,37 +399,37 @@ body {
     color: #333;
 }
 
-/* 汇总行样式 */
-.cross-period-table tfoot {
-    border-top: 2px solid #667eea;
-}
-
-.cross-period-table .summary-row {
-    background: #f8f9fa;
-    font-weight: 700;
-}
-
-.cross-period-table .summary-row td {
+/* 跨期净持仓表格 - 汇总条（放在表格下方，用 Grid 对齐 4 列） */
+.cross-period-summary {
+    display: grid;
+    grid-template-columns: 30% 20% 20% 30%;
     padding: 12px 16px;
+    margin-top: -1px; /* 紧贴表格底部 */
+    background: #f8f9fa;
     border-top: 2px solid #667eea;
-    font-size: 14px;
-    text-align: left;
+    font-weight: 700;
     box-sizing: border-box;
 }
 
-.cross-period-table .summary-row td:first-child {
+.cross-period-summary .summary-label {
     text-align: left;
 }
 
-.cross-period-table .summary-row td:nth-child(2),
-.cross-period-table .summary-row td:nth-child(3),
-.cross-period-table .summary-row td:nth-child(4) {
+.cross-period-summary .summary-value {
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
 
-.cross-period-table .summary-row:hover {
-    background: #e9ecef;
+.cross-period-summary .summary-value.net-long {
+    color: #c62828;
+}
+
+.cross-period-summary .summary-value.net-short {
+    color: #2e7d32;
+}
+
+.cross-period-summary .summary-value.total-position {
+    color: #333;
 }
 
 .rankings-grid {

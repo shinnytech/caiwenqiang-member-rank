@@ -1356,18 +1356,20 @@ function renderCrossPeriodTable() {
         `;
     });
     
-    // 添加汇总行
+    // 关闭表格主体
     tableHTML += `
             </tbody>
-            <tfoot>
-                <tr class="summary-row">
-                    <td><strong>合计</strong></td>
-                    <td class="net-long"><strong>${totalNetLong > 0 ? totalNetLong.toLocaleString() : '-'}</strong></td>
-                    <td class="net-short"><strong>${totalNetShort > 0 ? totalNetShort.toLocaleString() : '-'}</strong></td>
-                    <td class="total-position"><strong>${totalPosition.toLocaleString()}</strong></td>
-                </tr>
-            </tfoot>
         </table>
+    `;
+
+    // 使用独立的汇总条（不在 table 里），用 CSS Grid 做 4 列对齐
+    tableHTML += `
+        <div class="cross-period-summary">
+            <div class="summary-label">合计</div>
+            <div class="summary-value net-long">${totalNetLong > 0 ? totalNetLong.toLocaleString() : '-'}</div>
+            <div class="summary-value net-short">${totalNetShort > 0 ? totalNetShort.toLocaleString() : '-'}</div>
+            <div class="summary-value total-position">${totalPosition.toLocaleString()}</div>
+        </div>
     `;
     
     document.getElementById('cross-period-table').innerHTML = tableHTML;
