@@ -4,6 +4,11 @@ let allData = [];          // 全市场合约+期货公司数据（用于持仓�
 let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
 let trendChart = null;     // 趋势图表实例
 
+// 当前选择（品种 + 合约）下可用的交易日期集合（字符串形式：YYYYMMDD）
+let availableDateSet = new Set();
+// 日期选择器实例（flatpickr）
+let datePickerInstance = null;
+
 // 饼状图颜色配置
 const chartColors = [
     '#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#a8edea', '#fed6e3', '#d299c2'
@@ -196,161 +201,268 @@ function generateChartData(rankingData) {
     return chartData;
 }
 
-// CSV文件列表（合约维度的汇总数据，用于“持仓排行榜”页面）
-// 注意：这些文件是不带期货公司后缀的全市场数据
-const CSV_FILES = [
-    'SHFE_rb2601_2025-08-15_2026-01-13.csv',
-    'SHFE_rb2603_2025-08-14_2026-01-12.csv',
-    'SHFE_rb2605_2025-09-05_2026-01-12.csv'
+// 品种CSV文件列表（按品种命名，例如：SHFE_rb.csv）
+// 这些文件包含该品种下所有合约的数据
+// 程序会自动发现可用的CSV文件
+let PRODUCT_CSV_FILES = [];
+
+// 公司专用CSV文件列表（手动维护）
+// 目前只使用 SHFE_rb_Z中信期货.csv，如有更多公司文件，可在此追加
+const BROKER_CSV_FILES = [
+    'SHFE_rb_Z中信期货.csv'
 ];
+
+// 当前选中的品种
+let currentProduct = null;
 
 // 根据当前合约和期货公司推导对应的“期货公司专用”CSV文件名
 // 约定：公司专用文件名 = 原合约汇总文件名去掉“.csv”后 + '_' + 清洗后的期货公司名 + '.csv'
 // 例如：SHFE_rb2605_2025-09-05_2026-01-12.csv + BROKER="Z中信期货"
 //      => SHFE_rb2605_2025-09-05_2026-01-12_Z中信期货.csv
-function getBrokerCsvFilename(symbol, brokerName) {
-    if (!symbol || !brokerName) return null;
+// 根据品种和期货公司推导对应的"期货公司专用"CSV文件名
+// 约定：公司专用文件名 = {交易所}_{品种}_{期货公司}.csv
+// 例如：SHFE_rb.csv + BROKER="Z中信期货" => SHFE_rb_Z中信期货.csv
+function getBrokerCsvFilename(product, brokerName) {
+    if (!product || !brokerName) return null;
     
-    const symbolKey = symbol.replace('.', '_'); // SHFE.rb2605 -> SHFE_rb2605
-    // 找到与该合约匹配的基础汇总文件
-    const baseFile = CSV_FILES.find(f => f.startsWith(`${symbolKey}_`));
-    if (!baseFile) {
-        console.warn(`未找到合约 ${symbol} 对应的基础CSV文件，无法推导期货公司专用文件名`);
-        return null;
-    }
-    const baseName = baseFile.replace(/\.csv$/i, ''); // 去掉 .csv
     // 清洗期货公司名称，去掉不适合文件名的字符
     const brokerClean = brokerName.trim().replace(/[\\/:*?"<>|\s]+/g, '_');
-    return `${baseName}_${brokerClean}.csv`;
+    return `${product}_${brokerClean}.csv`;
 }
 
-// 加载CSV数据（优化版 - 支持多个文件）
-async function loadCSV() {
+// 发现可用的品种CSV文件（当前只支持 SHFE_rb，可根据需要扩展）
+async function discoverProductFiles() {
+    // 这里直接返回已知的品种文件列表
+    // 如果将来有更多品种，只需在数组中追加，例如 "DCE_m.csv" 等
+    return ["SHFE_rb.csv"];
+}
+
+// 加载品种CSV数据
+async function loadProductCSV(product) {
+    if (!product) return [];
+    
+    try {
+        const filename = `${product}.csv`;
+        const response = await fetch(filename);
+        if (!response.ok) {
+            console.warn(`无法加载文件: ${filename}`);
+            return [];
+        }
+        const text = await response.text();
+        const data = parseCSV(text);
+        console.log(`成功加载 ${filename}: ${data.length} 条记录`);
+        return data;
+    } catch (error) {
+        console.warn(`加载文件 ${product}.csv 失败:`, error);
+        return [];
+    }
+}
+
+// 初始化：发现并加载品种文件
+async function initialize() {
     try {
         const startTime = performance.now();
+        
+        // 发现可用的品种文件
+        PRODUCT_CSV_FILES = await discoverProductFiles();
+        
+        if (PRODUCT_CSV_FILES.length === 0) {
+            document.getElementById('rankings-container').innerHTML = 
+                '<div class="error">未找到品种CSV文件，请先运行后端程序生成数据</div>';
+            return;
+        }
+        
+        // 填充品种选择器
+        populateProductSelect();
+        
+        // 默认选择第一个品种
+        if (PRODUCT_CSV_FILES.length > 0) {
+            const firstProduct = PRODUCT_CSV_FILES[0].replace('.csv', '');
+            document.getElementById('product').value = firstProduct;
+            await onProductChange();
+        }
+        
+        const loadTime = performance.now() - startTime;
+        console.log(`初始化完成，耗时: ${loadTime.toFixed(2)}ms，发现 ${PRODUCT_CSV_FILES.length} 个品种文件`);
+    } catch (error) {
+        document.getElementById('rankings-container').innerHTML = 
+            '<div class="error">初始化失败，请确保CSV文件在同一目录下</div>';
+        console.error('Error initializing:', error);
+    }
+}
+
+// 品种变化事件
+async function onProductChange() {
+    const productSelect = document.getElementById('product');
+    const product = productSelect ? productSelect.value : null;
+    
+    if (!product) {
         allData = [];
+        return;
+    }
+    
+    currentProduct = product;
+    
+    try {
+        // 加载该品种的全部数据（所有合约）
+        allData = await loadProductCSV(product);
         
-        // 并行加载所有CSV文件
-        const loadPromises = CSV_FILES.map(async (filename) => {
-            try {
-                const response = await fetch(filename);
-                if (!response.ok) {
-                    console.warn(`无法加载文件: ${filename}`);
-                    return [];
-                }
-                const text = await response.text();
-                const data = parseCSV(text);
-                console.log(`成功加载 ${filename}: ${data.length} 条记录`);
-                return data;
-            } catch (error) {
-                console.warn(`加载文件 ${filename} 失败:`, error);
-                return [];
-            }
-        });
+        if (allData.length === 0) {
+            document.getElementById('rankings-container').innerHTML = 
+                '<div class="error">该品种暂无数据</div>';
+            return;
+        }
         
-        // 等待所有文件加载完成并合并数据
-        const allFileData = await Promise.all(loadPromises);
-        allData = allFileData.flat(); // 合并所有数组
-        
-        // 设置默认日期为最新日期（优化：使用Set去重更快）
-        const dateSet = new Set();
+        // 统计当前品种下所有合约
         const symbolSet = new Set();
         for (let i = 0, len = allData.length; i < len; i++) {
-            if (allData[i].datetime) {
-                dateSet.add(allData[i].datetime);
-            }
             if (allData[i].symbol) {
                 symbolSet.add(allData[i].symbol);
             }
         }
-        const dates = Array.from(dateSet).sort().reverse();
-        
-        if (dates.length > 0) {
-            const latestDate = dates[0];
-            const formattedDate = `${latestDate.substring(0, 4)}-${latestDate.substring(4, 6)}-${latestDate.substring(6, 8)}`;
-            document.getElementById('date').value = formattedDate;
-        }
-        
-        // 动态加载合约列表
-        populateSymbolSelect(Array.from(symbolSet).sort());
+
+        // 填充合约选择器（该品种下的所有合约）
+        populateContractSelect(Array.from(symbolSet).sort());
+
+        // 根据“全部合约”场景统计可用日期，并初始化日期选择器
+        const datesForAllContracts = getAvailableDatesForSelection('');
+        availableDateSet = new Set(datesForAllContracts);
+        setupDatePicker(datesForAllContracts);
         
         // 填充期货公司选择器
         populateBrokerSelect();
         
-        const loadTime = performance.now() - startTime;
-        console.log(`数据加载完成，耗时: ${loadTime.toFixed(2)}ms，共 ${allData.length} 条记录，${symbolSet.size} 个合约`);
+        console.log(`品种 ${product} 数据加载完成，共 ${allData.length} 条记录，${symbolSet.size} 个合约`);
         
         queryData();
     } catch (error) {
         document.getElementById('rankings-container').innerHTML = 
-            '<div class="error">加载数据失败，请确保CSV文件在同一目录下</div>';
-        console.error('Error loading CSV:', error);
+            '<div class="error">加载品种数据失败</div>';
+        console.error('Error loading product data:', error);
     }
 }
 
-// 动态填充合约选择器
-function populateSymbolSelect(symbols) {
-    const select = document.getElementById('symbol');
-    // 清空选择器
+// 填充品种选择器
+function populateProductSelect() {
+    const select = document.getElementById('product');
+    if (!select) return;
+    
     select.innerHTML = '';
     
-    // 添加所有合约选项
-    symbols.forEach(symbol => {
+    PRODUCT_CSV_FILES.forEach(filename => {
+        const product = filename.replace('.csv', '');
         const option = document.createElement('option');
-        option.value = symbol;
-        option.textContent = symbol;
+        option.value = product;
+        // 格式化显示名称：SHFE_rb -> SHFE.rb
+        const displayName = product.replace('_', '.');
+        option.textContent = displayName;
         select.appendChild(option);
     });
-    
-    // 默认选择第一个合约
-    if (symbols.length > 0) {
-        select.value = symbols[0];
+}
+
+// 填充合约选择器（按具体合约，如 rb2601 / rb2603 展示）
+function populateContractSelect(symbols) {
+    const select = document.getElementById('contract');
+    if (!select) return;
+
+    // 默认选项：全部合约
+    select.innerHTML = '<option value="">全部合约</option>';
+
+    symbols.forEach(symbol => {
+        const option = document.createElement('option');
+        // 过滤仍然用完整 symbol（例如 SHFE.rb2601），以兼容后续逻辑
+        option.value = symbol;
+        // 展示文案用 instrument_id 部分（例如 rb2601）
+        const parts = symbol.split('.');
+        const inst = parts.length > 1 ? parts[1] : symbol;
+        option.textContent = inst;
+        select.appendChild(option);
+    });
+}
+
+
+// 根据当前选择（合约）计算可用日期列表
+function getAvailableDatesForSelection(selectedContract) {
+    const dateSet = new Set();
+    for (let i = 0, len = allData.length; i < len; i++) {
+        const row = allData[i];
+        if (!row.datetime) continue;
+        if (selectedContract && row.symbol !== selectedContract) continue;
+        dateSet.add(row.datetime);
+    }
+    return Array.from(dateSet).sort(); // 升序
+}
+
+// 初始化 / 更新日期选择器（使用 flatpickr，并灰掉无数据日期）
+function setupDatePicker(dateList) {
+    const input = document.getElementById('date');
+    if (!input || dateList.length === 0 || typeof flatpickr === 'undefined') return;
+
+    // 转为 flatpickr 需要的 YYYY-MM-DD 格式
+    const enabledDates = dateList.map(d =>
+        `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`
+    );
+
+    if (datePickerInstance) {
+        // 已存在实例：只更新可用日期，尽量保留当前选中的日期
+        datePickerInstance.set('enable', enabledDates);
+        const currentValue = input.value;
+
+        if (currentValue && enabledDates.includes(currentValue)) {
+            // 当前选择依然合法，则保留用户选择的日期
+            datePickerInstance.setDate(currentValue, false);
+        } else {
+            // 当前选择不合法（例如切换了合约），则回退到最新一个有数据的交易日
+            const latest = enabledDates[enabledDates.length - 1];
+            datePickerInstance.setDate(latest, false);
+            input.value = latest;
+        }
+    } else {
+        datePickerInstance = flatpickr(input, {
+            dateFormat: 'Y-m-d',
+            enable: enabledDates,          // 只启用有数据的日期，其余日期自动灰掉并禁用
+            defaultDate: enabledDates[enabledDates.length - 1],
+            locale: 'zh',
+            onChange: function () {
+                onControlChange();
+            }
+        });
     }
 }
 
 // 查询数据
 function queryData() {
-    const symbol = document.getElementById('symbol').value.trim();
+    const contractSelect = document.getElementById('contract');
+    const selectedContract = contractSelect ? contractSelect.value.trim() : '';
     let dateInput = document.getElementById('date').value;
     
-    if (!symbol) {
-        // 如果没有选择合约，不执行查询
+    if (!currentProduct) {
         return;
     }
     
-    // 如果没有选择日期，或者选择的日期在当前合约中没有数据，自动选择该合约有数据的最新日期
+    // 通过日期选择器只会选到有效交易日，这里直接使用
     if (!dateInput) {
-        dateInput = findLatestDateForSymbol(symbol);
-        if (dateInput) {
-            document.getElementById('date').value = dateInput;
-        } else {
-            document.getElementById('rankings-container').innerHTML = 
-                '<div class="error">该合约暂无数据</div>';
+        const allDates = Array.from(availableDateSet).sort();
+        if (allDates.length === 0) {
+            document.getElementById('rankings-container').innerHTML =
+                '<div class="error">该品种暂无数据</div>';
             return;
         }
-    } else {
-        // 检查选择的日期是否有数据
-        const dateStr = dateInput.replace(/-/g, '');
-        const hasData = allData.some(row => row.datetime === dateStr && row.symbol === symbol);
-        if (!hasData) {
-            // 如果选择的日期没有数据，自动切换到该合约有数据的最新日期
-            const latestDate = findLatestDateForSymbol(symbol);
-            if (latestDate) {
-                document.getElementById('date').value = latestDate;
-                dateInput = latestDate;
-            } else {
-                document.getElementById('rankings-container').innerHTML = 
-                    '<div class="error">该合约在选择的日期没有数据，请选择其他日期</div>';
-                return;
-            }
-        }
+        const latest = allDates[allDates.length - 1];
+        const toInputFormat = (d) =>
+            `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`;
+        dateInput = toInputFormat(latest);
+        document.getElementById('date').value = dateInput;
     }
-    
+
     const dateStr = dateInput.replace(/-/g, '');
     
-    // 获取本日数据，只显示选择的合约
+    // 获取本日数据
+    // 如果选择了具体合约，只显示该合约；否则显示该品种下所有合约
     csvData = allData.filter(row => {
-        return row.datetime === dateStr && row.symbol === symbol;
+        if (row.datetime !== dateStr) return false;
+        if (selectedContract && row.symbol !== selectedContract) return false;
+        return true;
     });
     
     // 获取上日数据（用于对比）
@@ -359,13 +471,14 @@ function queryData() {
     const prevDateStr = dateObj.toISOString().slice(0, 10).replace(/-/g, '');
     
     csvDataPrev = allData.filter(row => {
-        return row.datetime === prevDateStr && row.symbol === symbol;
+        if (row.datetime !== prevDateStr) return false;
+        if (selectedContract && row.symbol !== selectedContract) return false;
+        return true;
     });
     
     if (csvData.length === 0) {
         document.getElementById('rankings-container').innerHTML = 
-            '<div class="error">未找到指定日期和合约的数据</div>';
-        // 即使没有数据，也尝试渲染分析图表（可能跨期表格有数据）
+            '<div class="error">未找到指定日期的数据</div>';
         renderAnalysisCharts();
         return;
     }
@@ -374,11 +487,11 @@ function queryData() {
     renderAnalysisCharts();
 }
 
-// 查找指定合约有数据的最新日期
-function findLatestDateForSymbol(symbol) {
+// 查找指定品种有数据的最新日期
+function findLatestDateForProduct() {
     const dateSet = new Set();
     for (let i = 0, len = allData.length; i < len; i++) {
-        if (allData[i].symbol === symbol && allData[i].datetime) {
+        if (allData[i].datetime) {
             dateSet.add(allData[i].datetime);
         }
     }
@@ -389,6 +502,7 @@ function findLatestDateForSymbol(symbol) {
     }
     return null;
 }
+
 
 // 渲染排名（优化版）
 function renderRankings() {
@@ -797,13 +911,15 @@ function sortTable(cardId, field) {
 
 // 渲染分析图表
 function renderAnalysisCharts() {
-    const symbol = document.getElementById('symbol').value.trim();
+    const contractSelect = document.getElementById('contract');
+    const selectedContract = contractSelect ? contractSelect.value.trim() : '';
     
-    // 渲染趋势图
+    // 渲染趋势图（使用选中的合约，如果没有选中则使用第一个合约）
+    const symbol = selectedContract || (allData.length > 0 ? allData[0].symbol : '');
     renderTrendChart(symbol);
     
-    // 渲染跨期净持仓表格
-    renderCrossPeriodTable(symbol);
+    // 渲染跨期净持仓表格（显示该品种下所有合约）
+    renderCrossPeriodTable();
 }
 
 // 渲染趋势图（近3个月）
@@ -1125,9 +1241,7 @@ function renderTrendChart(symbol) {
 }
 
 // 渲染跨期净持仓表格
-function renderCrossPeriodTable(symbol) {
-    if (!symbol) return;
-    
+function renderCrossPeriodTable() {
     // 获取当前查询日期的数据
     const dateInput = document.getElementById('date').value;
     if (!dateInput) return;
@@ -1137,18 +1251,9 @@ function renderCrossPeriodTable(symbol) {
     // 获取指定日期的所有合约数据（按合约和期货公司去重）
     const contractBrokerMap = new Map();
     
-    // 提取品种代码（例如：SHFE.rb2605 -> rb）
-    const symbolParts = symbol.split('.');
-    const productCode = symbolParts.length > 1 ? symbolParts[1].substring(0, 2) : '';
-    
     allData.forEach(row => {
         // 只处理指定日期的数据
         if (row.datetime !== dateStr) return;
-        
-        // 只显示相同品种的合约（例如：rb2605, rb2603, rb2601 等）
-        if (productCode && !row.symbol.includes(productCode)) {
-            return;
-        }
         
         const contractSymbol = row.symbol;
         const broker = row.broker;
@@ -1287,8 +1392,10 @@ function switchPage(pageType) {
         navRankings.classList.add('active');
         navBrokerDetail.classList.remove('active');
         
-        // 显示合约代码和日期，隐藏期货公司选择器和查询按钮
+        // 显示品种、合约和日期，隐藏期货公司选择器和查询按钮
         if (controlSymbol) controlSymbol.style.display = 'flex';
+        const controlContract = document.getElementById('control-contract');
+        if (controlContract) controlContract.style.display = 'flex';
         if (controlDate) controlDate.style.display = 'flex';
         if (controlBroker) controlBroker.style.display = 'none';
         if (btnQuery) btnQuery.style.display = 'block';
@@ -1298,8 +1405,10 @@ function switchPage(pageType) {
         navRankings.classList.remove('active');
         navBrokerDetail.classList.add('active');
         
-        // 显示所有控制项（合约代码、日期、期货公司），隐藏查询按钮
+        // 显示所有控制项（品种、合约、日期、期货公司），隐藏查询按钮
         if (controlSymbol) controlSymbol.style.display = 'flex';
+        const controlContract = document.getElementById('control-contract');
+        if (controlContract) controlContract.style.display = 'flex';
         if (controlDate) controlDate.style.display = 'flex';
         if (controlBroker) controlBroker.style.display = 'flex';
         if (btnQuery) btnQuery.style.display = 'none';
@@ -1312,23 +1421,37 @@ function switchPage(pageType) {
     }
 }
 
-// 填充期货公司选择器
+// 填充期货公司选择器（只展示当前品种有“公司专用CSV文件”的期货公司）
 function populateBrokerSelect() {
     const brokerSelectHeader = document.getElementById('broker-select-header');
     if (!brokerSelectHeader) return;
-    
-    // 获取所有唯一的期货公司名称
+
+    // 基于公司专用CSV文件列表，找出当前品种对应的期货公司
     const brokers = new Set();
-    allData.forEach(row => {
-        if (row.broker) {
-            brokers.add(row.broker);
-        }
-    });
-    
+    if (currentProduct) {
+        BROKER_CSV_FILES.forEach(filename => {
+            if (!filename.endsWith('.csv')) return;
+            const base = filename.replace('.csv', '');          // SHFE_rb_Z中信期货
+            const prefix = `${currentProduct}_`;                // 例如 SHFE_rb_
+            if (!base.startsWith(prefix)) return;
+
+            // 提取期货公司名部分（去掉前缀）
+            const brokerPart = base.substring(prefix.length);   // Z中信期货
+            // 文件名中如果有下划线表示清洗过空格/非法字符，这里简单替换回空格
+            const brokerName = brokerPart.replace(/_/g, ' ');
+            brokers.add(brokerName);
+        });
+    }
+
     // 清空现有选项（保留第一个"请选择"选项）
     brokerSelectHeader.innerHTML = '<option value="">请选择期货公司</option>';
-    
-    // 按字母顺序排序并添加选项
+
+    // 如果没有匹配的公司文件，则直接返回（只显示“请选择”）
+    if (brokers.size === 0) {
+        return;
+    }
+
+    // 按名称排序并添加选项
     const sortedBrokers = Array.from(brokers).sort();
     sortedBrokers.forEach(broker => {
         const option = document.createElement('option');
@@ -1397,22 +1520,28 @@ function onControlChange() {
             updateBrokerDetail(brokerSelectHeader.value);
         }
     } else {
-        // 在第一个页面，更新排行榜数据
+        // 在第一个页面，根据最新的合约选择更新可用日期，然后更新排行榜数据
+        const contractSelect = document.getElementById('contract');
+        const selectedContract = contractSelect ? contractSelect.value.trim() : '';
+
+        const dates = getAvailableDatesForSelection(selectedContract);
+        availableDateSet = new Set(dates);
+        setupDatePicker(dates);
+
         queryData();
     }
 }
 
 // 加载指定期货公司专用CSV数据（带期货公司后缀的文件）
 async function loadBrokerDataForCurrentSelection(brokerName) {
-    const symbol = document.getElementById('symbol').value;
-    if (!symbol || !brokerName) {
+    if (!currentProduct || !brokerName) {
         brokerDataAll = [];
         return;
     }
     
-    const filename = getBrokerCsvFilename(symbol, brokerName);
+    const filename = getBrokerCsvFilename(currentProduct, brokerName);
     if (!filename) {
-        console.warn(`未配置期货公司专用CSV文件: symbol=${symbol}, broker=${brokerName}`);
+        console.warn(`未配置期货公司专用CSV文件: product=${currentProduct}, broker=${brokerName}`);
         brokerDataAll = [];
         return;
     }
@@ -1435,8 +1564,7 @@ async function loadBrokerDataForCurrentSelection(brokerName) {
 
 // 页面切换：显示期货公司详情页（从第一个页面点击期货公司跳转）
 async function showBrokerDetail(brokerName) {
-    // 获取当前的合约代码和日期
-    const symbol = document.getElementById('symbol').value;
+    // 获取当前的日期
     const date = document.getElementById('date').value;
     
     // 先加载该期货公司的专用CSV数据
@@ -1445,10 +1573,7 @@ async function showBrokerDetail(brokerName) {
     // 切换到第二个页面
     switchPage('broker-detail');
     
-    // 设置控制项的值（保持合约代码和日期，设置期货公司）
-    if (symbol) {
-        document.getElementById('symbol').value = symbol;
-    }
+    // 设置控制项的值（保持日期，设置期货公司）
     if (date) {
         document.getElementById('date').value = date;
     }
@@ -1468,10 +1593,11 @@ function renderBrokerTrendChart(brokerName) {
     const ctx = canvas.getContext('2d');
     
     // 获取当前选中的合约和日期
-    const symbol = document.getElementById('symbol').value;
+    const contractSelect = document.getElementById('contract');
+    const symbol = contractSelect ? contractSelect.value.trim() : '';
     const date = document.getElementById('date').value;
     
-    if (!symbol || !date) return;
+    if (!date) return;
     
     // 选择数据源：如果已加载期货公司专用数据，则优先使用；否则回退到全量数据
     const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
@@ -1483,8 +1609,13 @@ function renderBrokerTrendChart(brokerName) {
     
     const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
-        if (row.symbol !== symbol) return false;
-        const rowDate = new Date(row.datetime);
+        if (symbol && row.symbol !== symbol) return false;
+        if (!row.datetime) return false;
+        const rowDate = new Date(
+            parseInt(row.datetime.substring(0, 4)),
+            parseInt(row.datetime.substring(4, 6)) - 1,
+            parseInt(row.datetime.substring(6, 8))
+        );
         return rowDate >= startDate && rowDate <= endDate;
     });
     
@@ -1498,12 +1629,17 @@ function renderBrokerTrendChart(brokerName) {
     }
     
     // 按日期排序
-    brokerData.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+    brokerData.sort((a, b) => {
+        const dateA = a.datetime ? parseInt(a.datetime) : 0;
+        const dateB = b.datetime ? parseInt(b.datetime) : 0;
+        return dateA - dateB;
+    });
     
     // 准备图表数据
     const labels = brokerData.map(row => {
-        const d = new Date(row.datetime);
-        return `${d.getMonth() + 1}-${d.getDate()}`;
+        if (!row.datetime) return '';
+        const dateStr = row.datetime;
+        return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
     });
     
     const longData = brokerData.map(row => parseFloat(row.long_oi) || 0);
@@ -1718,6 +1854,6 @@ function renderBrokerCrossPeriodChart(brokerName) {
 
 // 页面加载时初始化
 window.onload = function() {
-    loadCSV();
+    initialize();
 };
 

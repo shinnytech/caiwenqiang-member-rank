@@ -5,8 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>期货持仓数据分析</title>
     <link rel="stylesheet" href="styles.css">
+    <!-- 日期选择器 flatpickr 样式 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <!-- Chart.js 库 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- 日期选择器 flatpickr 脚本 -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 </head>
 <body>
     <div class="container">
@@ -14,16 +18,27 @@
             <div class="header-content">
                 <h1>期货持仓数据分析</h1>
                 <div class="controls" id="header-controls">
+                    <!-- 品种选择 -->
                     <div class="control-group" id="control-symbol">
-                        <label for="symbol">合约代码:</label>
-                        <select id="symbol" onchange="onControlChange()">
+                        <label for="product">品种:</label>
+                        <select id="product" onchange="onProductChange()">
+                            <!-- 品种选项将由JS动态加载 -->
+                        </select>
+                    </div>
+                    <!-- 合约选择（如 rb2601 / rb2603），默认始终可见 -->
+                    <div class="control-group" id="control-contract">
+                        <label for="contract">合约:</label>
+                        <select id="contract" onchange="onControlChange()">
+                            <option value="">全部合约</option>
                             <!-- 合约选项将由JS动态加载 -->
                         </select>
                     </div>
+                    <!-- 日期选择（使用自定义日期选择器，灰掉无数据日期） -->
                     <div class="control-group" id="control-date">
                         <label for="date">日期:</label>
-                        <input type="date" id="date" onchange="onControlChange()">
+                        <input type="text" id="date" placeholder="请选择交易日">
                     </div>
+                    <!-- 期货公司选择，在“公司持仓分析”页使用 -->
                     <div class="control-group" id="control-broker" style="display: none;">
                         <label for="broker-select-header">期货公司:</label>
                         <select id="broker-select-header" onchange="onBrokerSelectChange()">
