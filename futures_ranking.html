@@ -105,7 +105,13 @@
                 <div class="broker-detail-content">
                     <div class="broker-chart-card">
                         <div class="chart-header">
-                            <h2>持仓趋势图 (近3个月)</h2>
+                            <div class="chart-header-left">
+                                <h2>持仓趋势图</h2>
+                            </div>
+                            <div class="chart-header-right">
+                                <button class="range-btn" onclick="setBrokerTrendRange(1)">近1个月</button>
+                                <button class="range-btn active" onclick="setBrokerTrendRange(3)">近3个月</button>
+                            </div>
                         </div>
                         <div class="chart-wrapper">
                             <canvas id="brokerTrendChart"></canvas>

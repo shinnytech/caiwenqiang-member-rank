@@ -3,6 +3,8 @@ let csvDataPrev = [];
 let allData = [];          // 全市场合约+期货公司数据（用于持仓排行榜）
 let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
 let trendChart = null;     // 趋势图表实例
+// 公司持仓分析页：持仓趋势图的时间窗口（单位：月），默认近3个月
+let brokerTrendRangeMonths = 3;
 
 // 当前选择（品种 + 合约）下可用的交易日期集合（字符串形式：YYYYMMDD）
 let availableDateSet = new Set();
@@ -1487,6 +1489,16 @@ function updateBrokerDetail(brokerName) {
     renderBrokerCrossPeriodChart(brokerName);
 }
 
+// 切换期货公司持仓趋势图时间范围（1个月 / 3个月等）
+function setBrokerTrendRange(months) {
+    brokerTrendRangeMonths = months;
+    const brokerSelectHeader = document.getElementById('broker-select-header');
+    const brokerName = brokerSelectHeader ? brokerSelectHeader.value : '';
+    if (brokerName) {
+        renderBrokerTrendChart(brokerName);
+    }
+}
+
 // 清空期货公司图表
 function clearBrokerCharts() {
     const trendCanvas = document.getElementById('brokerTrendChart');
@@ -1603,20 +1615,22 @@ function renderBrokerTrendChart(brokerName) {
     
     // 选择数据源：如果已加载期货公司专用数据，则优先使用；否则回退到全量数据
     const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
-    
-    // 筛选该期货公司的数据（近3个月）
+
+    // 筛选该期货公司在近 N 个月内的数据
     const endDate = new Date(date);
     const startDate = new Date(endDate);
-    startDate.setMonth(startDate.getMonth() - 3);
-    
+    const range = brokerTrendRangeMonths && brokerTrendRangeMonths > 0 ? brokerTrendRangeMonths : 3;
+    startDate.setMonth(startDate.getMonth() - range);
+
     const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
         if (symbol && row.symbol !== symbol) return false;
         if (!row.datetime) return false;
+        const d = row.datetime;
         const rowDate = new Date(
-            parseInt(row.datetime.substring(0, 4)),
-            parseInt(row.datetime.substring(4, 6)) - 1,
-            parseInt(row.datetime.substring(6, 8))
+            parseInt(d.substring(0, 4)),
+            parseInt(d.substring(4, 6)) - 1,
+            parseInt(d.substring(6, 8))
         );
         return rowDate >= startDate && rowDate <= endDate;
     });
@@ -1629,28 +1643,43 @@ function renderBrokerTrendChart(brokerName) {
         ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
         return;
     }
+
+    if (brokerData.length === 0) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        return;
+    }
     
-    // 按日期排序
-    brokerData.sort((a, b) => {
-        const dateA = a.datetime ? parseInt(a.datetime) : 0;
-        const dateB = b.datetime ? parseInt(b.datetime) : 0;
-        return dateA - dateB;
-    });
-    
-    // 准备图表数据
-    const labels = brokerData.map(row => {
-        if (!row.datetime) return '';
-        const dateStr = row.datetime;
-        return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
-    });
-    
-    const longData = brokerData.map(row => parseFloat(row.long_oi) || 0);
-    const shortData = brokerData.map(row => parseFloat(row.short_oi) || 0);
-    const netData = brokerData.map(row => {
+    // 按交易日聚合到“每日一条”，避免同一天多条记录导致折线图出现竖直锯齿
+    const dateAggMap = new Map();
+    brokerData.forEach(row => {
+        if (!row.datetime) return;
+        const key = row.datetime;
         const long = parseFloat(row.long_oi) || 0;
         const short = parseFloat(row.short_oi) || 0;
-        return long - short;
+
+        if (!dateAggMap.has(key)) {
+            dateAggMap.set(key, { date: key, long: 0, short: 0 });
+        }
+        const agg = dateAggMap.get(key);
+        // 对同一交易日，取多头/空头持仓的最大值作为该日代表值（避免重复统计）
+        if (long > agg.long) agg.long = long;
+        if (short > agg.short) agg.short = short;
     });
+
+    const aggArr = Array.from(dateAggMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    // 准备图表数据
+    const labels = aggArr.map(d => {
+        const dateStr = d.date;
+        return `${dateStr.substring(0, 4)}-${dateStr.substring(4, 6)}-${dateStr.substring(6, 8)}`;
+    });
+    const longData = aggArr.map(d => d.long);
+    const shortData = aggArr.map(d => d.short);
+    const netData = aggArr.map(d => d.long - d.short);
     
     // 销毁旧图表
     if (window.brokerTrendChartInstance) {
@@ -1668,25 +1697,31 @@ function renderBrokerTrendChart(brokerName) {
                     data: longData,
                     borderColor: '#4facfe',
                     backgroundColor: 'rgba(79, 172, 254, 0.1)',
-                    fill: true,
-                    tension: 0.4
+                    fill: false,
+                    tension: 0.2,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
                 },
                 {
                     label: '空头持仓',
                     data: shortData,
                     borderColor: '#43e97b',
                     backgroundColor: 'rgba(67, 233, 123, 0.1)',
-                    fill: true,
-                    tension: 0.4
+                    fill: false,
+                    tension: 0.2,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
                 },
                 {
                     label: '净持仓',
                     data: netData,
                     borderColor: '#fee140',
                     backgroundColor: 'rgba(254, 225, 64, 0.1)',
-                    fill: true,
-                    tension: 0.4,
-                    borderWidth: 2
+                    fill: false,
+                    tension: 0.2,
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    pointHoverRadius: 4
                 }
             ]
         },
@@ -1724,15 +1759,17 @@ function renderBrokerCrossPeriodChart(brokerName) {
     
     const ctx = canvas.getContext('2d');
     
-    // 获取当前选中的日期
-    const date = document.getElementById('date').value;
-    if (!date) return;
+    // 获取当前选中的日期（输入框是 YYYY-MM-DD，需要转成 CSV 中的 YYYYMMDD）
+    const dateInput = document.getElementById('date').value;
+    if (!dateInput) return;
+    const dateStr = dateInput.replace(/-/g, '');
     
     // 获取该期货公司在所有合约的数据（当前日期）
     const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
     const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
-        return row.datetime === date;
+        if (!row.datetime) return false;
+        return row.datetime === dateStr;
     });
     
     if (brokerData.length === 0) {

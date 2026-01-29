@@ -313,12 +313,41 @@ body {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
 }
 
 .chart-header h2 {
     font-size: 20px;
     font-weight: 600;
     margin: 0;
+}
+
+.chart-header-right {
+    display: flex;
+    gap: 8px;
+}
+
+.range-btn {
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    background: transparent;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.range-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.range-btn.active {
+    background: #fff;
+    color: #4c51bf;
 }
 
 .chart-wrapper {
@@ -988,11 +1017,7 @@ body {
     height: 500px;
 }
 
-@media (min-width: 1200px) {
-    .broker-detail-content {
-        grid-template-columns: 1fr 1fr;
-    }
-}
+/* 公司持仓分析页：一个图一行，统一使用单列布局 */
 
 @media (max-width: 1024px) {
     .main-layout {
