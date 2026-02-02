@@ -327,13 +327,15 @@ async function onProductChange() {
             }
         }
 
-        // 填充合约选择器（该品种下的所有合约）
-        populateContractSelect(Array.from(symbolSet).sort());
+        const sortedSymbols = Array.from(symbolSet).sort();
+        populateContractSelect(sortedSymbols);
 
-        // 根据“全部合约”场景统计可用日期，并初始化日期选择器
-        const datesForAllContracts = getAvailableDatesForSelection('');
-        availableDateSet = new Set(datesForAllContracts);
-        setupDatePicker(datesForAllContracts);
+        // 按当前选中合约统计可用日期，并初始化日期选择器
+        const contractSelect = document.getElementById('contract');
+        const selectedContract = contractSelect ? contractSelect.value : (sortedSymbols[0] || '');
+        const datesForSelection = getAvailableDatesForSelection(selectedContract);
+        availableDateSet = new Set(datesForSelection);
+        setupDatePicker(datesForSelection);
         
         // 填充期货公司选择器
         populateBrokerSelect();
@@ -366,24 +368,21 @@ function populateProductSelect() {
     });
 }
 
-// 填充合约选择器（按具体合约，如 rb2601 / rb2603 展示）
+// 填充合约选择器（按具体合约，如 rb2601 / rb2603 展示，无“全部合约”选项）
 function populateContractSelect(symbols) {
     const select = document.getElementById('contract');
     if (!select) return;
 
-    // 默认选项：全部合约
-    select.innerHTML = '<option value="">全部合约</option>';
-
+    select.innerHTML = '';
     symbols.forEach(symbol => {
         const option = document.createElement('option');
-        // 过滤仍然用完整 symbol（例如 SHFE.rb2601），以兼容后续逻辑
         option.value = symbol;
-        // 展示文案用 instrument_id 部分（例如 rb2601）
         const parts = symbol.split('.');
         const inst = parts.length > 1 ? parts[1] : symbol;
         option.textContent = inst;
         select.appendChild(option);
     });
+    if (symbols.length > 0) select.value = symbols[0];
 }
 
 
