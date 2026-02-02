@@ -315,6 +315,12 @@ body {
     overflow-x: auto;
 }
 
+/* 公司持仓分析页：趋势图下方表格限制高度，支持滚轮滑动 */
+#broker-trend-table {
+    max-height: 380px;
+    overflow: auto;
+}
+
 .broker-trend-table th:not(:first-child),
 .broker-trend-table td:not(:first-child) {
     text-align: right;
