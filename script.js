@@ -212,12 +212,6 @@ function generateChartData(rankingData) {
 // 程序会自动发现可用的CSV文件
 let PRODUCT_CSV_FILES = [];
 
-// 公司专用CSV文件列表（手动维护）
-// 目前只使用 SHFE_rb_Z中信期货.csv，如有更多公司文件，可在此追加
-const BROKER_CSV_FILES = [
-    'SHFE_rb_Z中信期货.csv'
-];
-
 // 当前选中的品种
 let currentProduct = null;
 
@@ -337,8 +331,8 @@ async function onProductChange() {
         availableDateSet = new Set(datesForSelection);
         setupDatePicker(datesForSelection);
         
-        // 填充期货公司选择器
-        populateBrokerSelect();
+        // 填充期货公司选择器（自动检测有专用CSV的公司）
+        await populateBrokerSelect();
         
         console.log(`品种 ${product} 数据加载完成，共 ${allData.length} 条记录，${symbolSet.size} 个合约`);
         
@@ -1425,43 +1419,43 @@ function switchPage(pageType) {
 }
 
 // 填充期货公司选择器（只展示当前品种有“公司专用CSV文件”的期货公司）
-function populateBrokerSelect() {
+async function populateBrokerSelect() {
     const brokerSelectHeader = document.getElementById('broker-select-header');
     if (!brokerSelectHeader) return;
 
-    // 基于公司专用CSV文件列表，找出当前品种对应的期货公司
-    const brokers = new Set();
-    if (currentProduct) {
-        BROKER_CSV_FILES.forEach(filename => {
-            if (!filename.endsWith('.csv')) return;
-            const base = filename.replace('.csv', '');          // SHFE_rb_Z中信期货
-            const prefix = `${currentProduct}_`;                // 例如 SHFE_rb_
-            if (!base.startsWith(prefix)) return;
+    brokerSelectHeader.innerHTML = '<option value="">请选择期货公司</option>';
+    if (!currentProduct || !allData || allData.length === 0) return;
 
-            // 提取期货公司名部分（去掉前缀）
-            const brokerPart = base.substring(prefix.length);   // Z中信期货
-            // 文件名中如果有下划线表示清洗过空格/非法字符，这里简单替换回空格
-            const brokerName = brokerPart.replace(/_/g, ' ');
-            brokers.add(brokerName);
-        });
+    const brokerSet = new Set();
+    for (let i = 0, len = allData.length; i < len; i++) {
+        const b = allData[i].broker;
+        if (b && b.trim()) brokerSet.add(b.trim());
     }
 
-    // 清空现有选项（保留第一个"请选择"选项）
+    const checkPromises = Array.from(brokerSet).map(async (broker) => {
+        const filename = getBrokerCsvFilename(currentProduct, broker);
+        if (!filename) return null;
+        try {
+            const resp = await fetch(encodeURI(filename), { method: 'HEAD' });
+            return resp.ok ? broker : null;
+        } catch { return null; }
+    });
+    const results = await Promise.all(checkPromises);
+    const brokers = results.filter(Boolean);
+
     brokerSelectHeader.innerHTML = '<option value="">请选择期货公司</option>';
 
     // 如果没有匹配的公司文件，则直接返回（只显示“请选择”）
-    if (brokers.size === 0) {
-        return;
-    }
+    if (brokers.length === 0) return;
 
-    // 按名称排序并添加选项
-    const sortedBrokers = Array.from(brokers).sort();
+    const sortedBrokers = [...brokers].sort();
     sortedBrokers.forEach(broker => {
         const option = document.createElement('option');
         option.value = broker;
         option.textContent = broker;
         brokerSelectHeader.appendChild(option);
     });
+    console.log('自动发现期货公司专用数据:', sortedBrokers.join(', '));
 }
 
 // 期货公司选择器变化事件（切换期货公司时，优先加载对应的专用CSV数据）
