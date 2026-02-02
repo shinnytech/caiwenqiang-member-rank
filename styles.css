@@ -312,6 +312,16 @@ body {
 
 .table-wrapper {
     padding: 16px 20px;
+    overflow-x: auto;
+}
+
+.broker-trend-table th:not(:first-child),
+.broker-trend-table td:not(:first-child) {
+    text-align: right;
+}
+.broker-trend-table td:first-child,
+.broker-trend-table th:first-child {
+    text-align: left;
 }
 
 /* 表格 */

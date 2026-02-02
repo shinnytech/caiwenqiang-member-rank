@@ -1076,23 +1076,25 @@ function renderTrendChart(symbol) {
     const totalLongData = chartData.map(d => d.totalLong);
     const totalShortData = chartData.map(d => d.totalShort);
     const netPositionData = chartData.map(d => d.totalLong - d.totalShort);
-    
-    // 计算价格数据（使用成交量作为价格代理，因为CSV中没有价格数据）
-    // 实际应用中应该从价格数据源获取
+    const volumeData = chartData.map(d => d.totalVolume);
+    // 日环比增减（当日 - 前一日）
+    const totalLongChange = chartData.map((d, i) => i === 0 ? null : d.totalLong - chartData[i - 1].totalLong);
+    const totalShortChange = chartData.map((d, i) => i === 0 ? null : d.totalShort - chartData[i - 1].totalShort);
+    const totalVolumeChange = chartData.map((d, i) => i === 0 ? null : d.totalVolume - chartData[i - 1].totalVolume);
+
+    // 计算价格数据（使用净持仓变化模拟，CSV中无价格）
     const priceData = chartData.map(d => {
-        // 使用持仓量变化趋势模拟价格，实际应该用真实价格数据
         const basePrice = 65000;
         const variation = (d.totalLong - d.totalShort) / 1000;
         return basePrice + variation;
     });
-    
+
     // 销毁旧图表
     if (trendChart) {
         trendChart.destroy();
         trendChart = null;
     }
 
-    // 确保 canvas 存在（可能曾被“暂无数据”替换掉）
     let trendCanvas = document.getElementById('trendChart');
     if (!trendCanvas) {
         const wrapper = document.querySelector('#analysis-charts .chart-wrapper');
@@ -1102,6 +1104,7 @@ function renderTrendChart(symbol) {
     if (!trendCanvas) return;
 
     const ctx = trendCanvas.getContext('2d');
+    // 混合图表：折线（总多头/总空头/净持仓/收盘价）+ 柱状（成交量）
     trendChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -1132,116 +1135,16 @@ function renderTrendChart(symbol) {
                     yAxisID: 'y'
                 },
                 {
-                    label: '收盘价',
-                    data: priceData,
-                    borderColor: '#dc2626',
-                    backgroundColor: 'rgba(220, 38, 38, 0.08)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    pointHoverRadius: 4,
-                    yAxisID: 'y1'
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top',
-                },
-                tooltip: {
-                    enabled: true,
-                }
-            },
-            scales: {
-                x: {
-                    display: true,
-                    title: {
-                        display: true,
-                        text: '日期'
-                    },
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45
-                    }
-                },
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: {
-                        display: true,
-                        text: '持仓量'
-                    },
-                    beginAtZero: false
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    title: {
-                        display: true,
-                        text: '价格'
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                    },
-                    beginAtZero: false
-                }
-            }
-        }
-    });
-    
-    // 重新创建包含所有数据的图表（使用混合图表）
-    trendChart.destroy();
-    
-    // 创建混合图表：折线图 + 柱状图
-    trendChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: '总多头',
-                    data: totalLongData,
-                    borderColor: '#2563eb',
-                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    pointHoverRadius: 4,
-                    yAxisID: 'y'
-                },
-                {
-                    label: '总空头',
-                    data: totalShortData,
-                    borderColor: '#16a34a',
-                    backgroundColor: 'rgba(22, 163, 74, 0.08)',
-                    borderWidth: 2,
-                    fill: false,
-                    tension: 0.4,
-                    pointRadius: 0,
-                    pointHoverRadius: 4,
-                    yAxisID: 'y'
-                },
-                {
-                    type: 'bar',
                     label: '净持仓',
                     data: netPositionData,
-                    backgroundColor: netPositionData.map(v => v >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)'),
-                    borderColor: netPositionData.map(v => v >= 0 ? 'rgba(22, 163, 74, 1)' : 'rgba(220, 38, 38, 1)'),
-                    borderWidth: 1,
-                    yAxisID: 'y',
-                    order: 1
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    yAxisID: 'y'
                 },
                 {
                     label: '收盘价',
@@ -1255,16 +1158,25 @@ function renderTrendChart(symbol) {
                     pointHoverRadius: 4,
                     yAxisID: 'y1',
                     order: 0
+                },
+                {
+                    type: 'bar',
+                    label: '成交量',
+                    data: volumeData,
+                    yAxisID: 'y',
+                    backgroundColor: 'rgba(100, 116, 139, 0.25)',
+                    borderColor: 'rgba(100, 116, 139, 0.5)',
+                    borderWidth: 1,
+                    barPercentage: 0.5,
+                    categoryPercentage: 0.8,
+                    order: 1
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false,
-            },
+            interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: {
                     display: true,
@@ -1272,43 +1184,51 @@ function renderTrendChart(symbol) {
                 },
                 tooltip: {
                     enabled: true,
+                    callbacks: {
+                        afterBody: function(tooltipItems) {
+                            if (!tooltipItems.length) return '';
+                            const idx = tooltipItems[0].dataIndex;
+                            if (idx == null) return '';
+                            const parts = [];
+                            const netCh = totalLongChange[idx] != null && totalShortChange[idx] != null
+                                ? (totalLongChange[idx] - totalShortChange[idx]) : null;
+                            tooltipItems.forEach(function(item) {
+                                if (item.datasetIndex === 0 && totalLongChange[idx] != null && totalLongChange[idx] !== 0)
+                                    parts.push('总多头增减: ' + (totalLongChange[idx] >= 0 ? '+' : '') + totalLongChange[idx].toLocaleString());
+                                if (item.datasetIndex === 1 && totalShortChange[idx] != null && totalShortChange[idx] !== 0)
+                                    parts.push('总空头增减: ' + (totalShortChange[idx] >= 0 ? '+' : '') + totalShortChange[idx].toLocaleString());
+                                if (item.datasetIndex === 2 && netCh != null && netCh !== 0)
+                                    parts.push('净持仓增减: ' + (netCh >= 0 ? '+' : '') + netCh.toLocaleString());
+                                if (item.datasetIndex === 4 && totalVolumeChange[idx] != null && totalVolumeChange[idx] !== 0)
+                                    parts.push('成交量增减: ' + (totalVolumeChange[idx] >= 0 ? '+' : '') + totalVolumeChange[idx].toLocaleString());
+                            });
+                            return parts.length ? parts.join('\n') : '';
+                        }
+                    }
                 }
             },
             scales: {
                 x: {
                     display: true,
-                    title: {
-                        display: true,
-                        text: '日期'
-                    },
-                    ticks: {
-                        maxRotation: 45,
-                        minRotation: 45,
-                        maxTicksLimit: 15
-                    }
+                    title: { display: true, text: '日期' },
+                    ticks: { maxRotation: 45, minRotation: 45, maxTicksLimit: 15 }
                 },
                 y: {
                     type: 'linear',
                     display: true,
                     position: 'left',
-                    title: {
-                        display: true,
-                        text: '持仓量'
-                    },
-                    beginAtZero: false
+                    title: { display: true, text: '持仓量' },
+                    beginAtZero: false,
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
                 },
                 y1: {
                     type: 'linear',
                     display: true,
                     position: 'right',
-                    title: {
-                        display: true,
-                        text: '价格'
-                    },
-                    grid: {
-                        drawOnChartArea: false,
-                    },
-                    beginAtZero: false
+                    title: { display: true, text: '价格' },
+                    grid: { drawOnChartArea: false },
+                    beginAtZero: false,
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
                 }
             }
         }
@@ -1738,21 +1658,28 @@ function renderBrokerTrendChart(brokerName) {
         return;
     }
 
-    // 按交易日聚合到“每日一条”，避免同一天多条记录导致折线图出现竖直锯齿
+    // 按交易日聚合到“每日一条”，含成交量及增减
     const dateAggMap = new Map();
     brokerData.forEach(row => {
         if (!row.datetime) return;
         const key = row.datetime;
         const long = parseFloat(row.long_oi) || 0;
         const short = parseFloat(row.short_oi) || 0;
+        const volume = parseFloat(row.volume) || 0;
+        const longChange = parseFloat(row.long_change) || 0;
+        const shortChange = parseFloat(row.short_change) || 0;
+        const volumeChange = parseFloat(row.volume_change) || 0;
 
         if (!dateAggMap.has(key)) {
-            dateAggMap.set(key, { date: key, long: 0, short: 0 });
+            dateAggMap.set(key, {
+                date: key, long: 0, short: 0, volume: 0,
+                long_change: 0, short_change: 0, volume_change: 0
+            });
         }
         const agg = dateAggMap.get(key);
-        // 对同一交易日，取多头/空头持仓的最大值作为该日代表值（避免重复统计）
-        if (long > agg.long) agg.long = long;
-        if (short > agg.short) agg.short = short;
+        if (long > agg.long) { agg.long = long; agg.long_change = longChange; }
+        if (short > agg.short) { agg.short = short; agg.short_change = shortChange; }
+        if (volume > agg.volume) { agg.volume = volume; agg.volume_change = volumeChange; }
     });
 
     const aggArr = Array.from(dateAggMap.values()).sort((a, b) => a.date.localeCompare(b.date));
@@ -1768,6 +1695,7 @@ function renderBrokerTrendChart(brokerName) {
     const longData = aggArr.map(d => d.long);
     const shortData = aggArr.map(d => d.short);
     const netData = aggArr.map(d => d.long - d.short);
+    const volumeData = aggArr.map(d => d.volume);
     
     // 销毁旧图表
     if (window.brokerTrendChartInstance) {
@@ -1810,12 +1738,24 @@ function renderBrokerTrendChart(brokerName) {
                     borderWidth: 2,
                     pointRadius: 2,
                     pointHoverRadius: 4
+                },
+                {
+                    type: 'bar',
+                    label: '成交量',
+                    data: volumeData,
+                    yAxisID: 'y1',
+                    backgroundColor: 'rgba(100, 116, 139, 0.25)',
+                    borderColor: 'rgba(100, 116, 139, 0.5)',
+                    borderWidth: 1,
+                    barPercentage: 0.6,
+                    categoryPercentage: 0.8
                 }
             ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: {
                     display: true,
@@ -1823,12 +1763,49 @@ function renderBrokerTrendChart(brokerName) {
                 },
                 tooltip: {
                     mode: 'index',
-                    intersect: false
+                    intersect: false,
+                    callbacks: {
+                        afterBody: function(tooltipItems) {
+                            if (!tooltipItems.length) return '';
+                            const idx = tooltipItems[0].dataIndex;
+                            if (idx == null || !aggArr[idx]) return '';
+                            const d = aggArr[idx];
+                            const parts = [];
+                            tooltipItems.forEach(function(item) {
+                                if (item.datasetIndex === 0 && d.long_change != null && d.long_change !== 0)
+                                    parts.push('多头增减: ' + (d.long_change >= 0 ? '+' : '') + d.long_change.toLocaleString());
+                                if (item.datasetIndex === 1 && d.short_change != null && d.short_change !== 0)
+                                    parts.push('空头增减: ' + (d.short_change >= 0 ? '+' : '') + d.short_change.toLocaleString());
+                                if (item.datasetIndex === 2) {
+                                    const netCh = (d.long_change != null ? d.long_change : 0) - (d.short_change != null ? d.short_change : 0);
+                                    if (netCh !== 0) parts.push('净持仓增减: ' + (netCh >= 0 ? '+' : '') + netCh.toLocaleString());
+                                }
+                                if (item.datasetIndex === 3 && d.volume_change != null && d.volume_change !== 0)
+                                    parts.push('成交量增减: ' + (d.volume_change >= 0 ? '+' : '') + d.volume_change.toLocaleString());
+                            });
+                            return parts.length ? parts.join('\n') : '';
+                        }
+                    }
                 }
             },
             scales: {
                 y: {
+                    type: 'linear',
+                    position: 'left',
                     beginAtZero: false,
+                    grid: { drawOnChartArea: true },
+                    ticks: {
+                        callback: function(value) {
+                            return value.toLocaleString();
+                        }
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: '成交量' },
                     ticks: {
                         callback: function(value) {
                             return value.toLocaleString();
@@ -1840,7 +1817,7 @@ function renderBrokerTrendChart(brokerName) {
     });
 }
 
-// 渲染持仓趋势图对应的数据表格（日期、多头、空头、净持仓）
+// 渲染持仓趋势图对应的数据表格（日期、多头、空头、净持仓、成交量及增减）
 function renderBrokerTrendTable(aggArr) {
     const container = document.getElementById('broker-trend-table');
     if (!container) return;
@@ -1848,27 +1825,45 @@ function renderBrokerTrendTable(aggArr) {
         container.innerHTML = '<div class="loading">暂无数据</div>';
         return;
     }
+    const fmtChange = (v) => {
+        if (v == null || v === 0) return '-';
+        const n = Number(v);
+        const s = (n >= 0 ? '+' : '') + n.toLocaleString();
+        return s;
+    };
+    const changeClass = (v) => (v != null && Number(v) < 0 ? 'negative' : 'positive');
     let html = `
-        <table class="cross-period-table">
+        <table class="cross-period-table broker-trend-table">
             <thead>
                 <tr>
                     <th>日期</th>
                     <th>多头持仓</th>
+                    <th>多头增减</th>
                     <th>空头持仓</th>
+                    <th>空头增减</th>
                     <th>净持仓</th>
+                    <th>成交量</th>
+                    <th>成交量增减</th>
                 </tr>
             </thead>
             <tbody>
     `;
     aggArr.forEach(d => {
         const dateStr = `${d.date.substring(0, 4)}-${d.date.substring(4, 6)}-${d.date.substring(6, 8)}`;
-        const net = d.long - d.short;
+        const net = (d.long || 0) - (d.short || 0);
+        const longCh = fmtChange(d.long_change);
+        const shortCh = fmtChange(d.short_change);
+        const volCh = fmtChange(d.volume_change);
         html += `
             <tr>
                 <td>${dateStr}</td>
                 <td>${(d.long || 0).toLocaleString()}</td>
+                <td class="summary-value ${changeClass(d.long_change)}">${longCh}</td>
                 <td>${(d.short || 0).toLocaleString()}</td>
+                <td class="summary-value ${changeClass(d.short_change)}">${shortCh}</td>
                 <td>${net.toLocaleString()}</td>
+                <td>${(d.volume || 0).toLocaleString()}</td>
+                <td class="summary-value ${changeClass(d.volume_change)}">${volCh}</td>
             </tr>
         `;
     });
