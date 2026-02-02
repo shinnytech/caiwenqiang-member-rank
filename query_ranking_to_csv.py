@@ -107,10 +107,10 @@ def load_existing_data(filename):
     if os.path.exists(filename):
         try:
             df = pd.read_csv(filename, encoding='utf-8-sig')
-            print(f"  ✓ 加载现有数据: {len(df)} 条记录")
+            print(f"  [OK] 加载现有数据: {len(df)} 条记录")
             return df
         except Exception as e:
-            print(f"  ⚠ 加载现有数据失败: {e}，将创建新文件")
+            print(f"  [WARN] 加载现有数据失败: {e}，将创建新文件")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -136,7 +136,7 @@ def merge_and_deduplicate(old_df, new_df):
     # 确保所有必需的列都存在
     for col in key_columns:
         if col not in combined.columns:
-            print(f"  ⚠ 警告：数据中缺少列 '{col}'，无法去重")
+            print(f"  [WARN] 警告：数据中缺少列 '{col}'，无法去重")
             return combined
     
     # 按日期排序，确保最新的数据在后面
@@ -171,11 +171,11 @@ def query_symbol_data(api, symbol, ranking_types, days, start_dt, broker):
                 df['ranking_type'] = ranking_type
                 df['ranking_type_name'] = type_name
                 all_dfs.append(df)
-                print(f"      ✓ {type_name} 查询完成，共 {len(df)} 条数据")
+                print(f"      [OK] {type_name} 查询完成，共 {len(df)} 条数据")
             else:
-                print(f"      ⚠ {type_name} 查询完成，但无数据")
+                print(f"      [WARN] {type_name} 查询完成，但无数据")
         except Exception as e:
-            print(f"      ✗ {type_name} 查询失败: {e}")
+            print(f"      [FAIL] {type_name} 查询失败: {e}")
     
     if all_dfs:
         combined = pd.concat(all_dfs, ignore_index=True)
@@ -291,13 +291,13 @@ def main():
                 # 保存为CSV
                 merged_df.to_csv(csv_filename, index=False, encoding='utf-8-sig')
                 
-                print(f"\n  ✓ 数据已保存到: {os.path.abspath(csv_filename)}")
+                print(f"\n  [OK] 数据已保存到: {os.path.abspath(csv_filename)}")
                 print(f"    原有数据: {old_count} 条")
                 print(f"    新增数据: {new_count} 条")
                 print(f"    合并后总计: {merged_count} 条")
                 print(f"    实际新增: {added_count} 条（去重后）")
             else:
-                print(f"\n  ⚠ {exchange}.{product} 没有新数据")
+                print(f"\n  [WARN] {exchange}.{product} 没有新数据")
                 if len(existing_df) > 0:
                     print(f"    保留现有数据: {len(existing_df)} 条")
         

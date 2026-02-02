@@ -460,11 +460,12 @@ function queryData() {
     }
 
     const dateStr = dateInput.replace(/-/g, '');
-    
+    const rowDateYmd = (dt) => (dt && typeof dt === 'string') ? (dt.length >= 8 ? dt.substring(0, 8) : dt) : '';
+
     // 获取本日数据
     // 如果选择了具体合约，只显示该合约；否则显示该品种下所有合约
     csvData = allData.filter(row => {
-        if (row.datetime !== dateStr) return false;
+        if (rowDateYmd(row.datetime) !== dateStr) return false;
         if (selectedContract && row.symbol !== selectedContract) return false;
         return true;
     });
@@ -475,7 +476,7 @@ function queryData() {
     const prevDateStr = dateObj.toISOString().slice(0, 10).replace(/-/g, '');
     
     csvDataPrev = allData.filter(row => {
-        if (row.datetime !== prevDateStr) return false;
+        if (rowDateYmd(row.datetime) !== prevDateStr) return false;
         if (selectedContract && row.symbol !== selectedContract) return false;
         return true;
     });
@@ -926,18 +927,17 @@ function renderAnalysisCharts() {
     renderCrossPeriodTable();
 }
 
-// 根据范围计算起止日期（endDate 为终点，往前推）
+// 根据范围计算起止日期（endDate 为终点，往前推；统一用天数避免 setMonth 月末溢出）
 function getTrendStartEnd(range, endDate) {
     const end = endDate ? new Date(endDate) : new Date();
-    const start = new Date(end);
-    if (range === 'week') {
-        start.setDate(start.getDate() - 7);
-    } else if (range === 'month') {
-        start.setMonth(start.getMonth() - 1);
-    } else {
-        start.setMonth(start.getMonth() - 3);
-    }
-    return { startDate: start, endDate: end };
+    const endYmdOnly = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    const endTime = endYmdOnly.getTime();
+    const start = new Date(endTime);
+    let daysBack = 90;
+    if (range === 'week') daysBack = 7;
+    else if (range === 'month') daysBack = 30;
+    start.setDate(start.getDate() - daysBack);
+    return { startDate: start, endDate: new Date(endTime) };
 }
 
 // 格式化为 YYYYMMDD，避免 Date 比较的时区/时间导致边界错误
@@ -964,8 +964,9 @@ function setTrendChartRange(range) {
 
 // 渲染趋势图（按前一周/前一月/前三月）
 function renderTrendChart(symbol) {
+    if (!symbol && allData.length) symbol = allData[0].symbol;
     if (!symbol) return;
-    
+
     // 以日期选择器的日期为终点；若为空则用该合约在 allData 中的最新日期
     const dateInput = document.getElementById('date');
     let endDateForRange = null;
@@ -1044,11 +1045,27 @@ function renderTrendChart(symbol) {
         .slice(-90); // 最多显示90天
     
     if (chartData.length === 0) {
-        document.getElementById('trendChart').parentElement.innerHTML = 
-            '<div class="loading">暂无数据</div>';
+        let canvas = document.getElementById('trendChart');
+        const wrapper = document.querySelector('#analysis-charts .chart-wrapper');
+        if (!canvas && wrapper) {
+            wrapper.innerHTML = '<canvas id="trendChart"></canvas>';
+            canvas = document.getElementById('trendChart');
+        }
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#666';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        }
+        if (trendChart) {
+            trendChart.destroy();
+            trendChart = null;
+        }
         return;
     }
-    
+
     // 准备图表数据
     const labels = chartData.map(d => {
         const date = d.date;
@@ -1071,10 +1088,19 @@ function renderTrendChart(symbol) {
     // 销毁旧图表
     if (trendChart) {
         trendChart.destroy();
+        trendChart = null;
     }
-    
-    // 创建新图表
-    const ctx = document.getElementById('trendChart').getContext('2d');
+
+    // 确保 canvas 存在（可能曾被“暂无数据”替换掉）
+    let trendCanvas = document.getElementById('trendChart');
+    if (!trendCanvas) {
+        const wrapper = document.querySelector('#analysis-charts .chart-wrapper');
+        if (wrapper) wrapper.innerHTML = '<canvas id="trendChart"></canvas>';
+        trendCanvas = document.getElementById('trendChart');
+    }
+    if (!trendCanvas) return;
+
+    const ctx = trendCanvas.getContext('2d');
     trendChart = new Chart(ctx, {
         type: 'line',
         data: {
@@ -1290,18 +1316,24 @@ function renderTrendChart(symbol) {
 
 // 渲染跨期净持仓表格
 function renderCrossPeriodTable() {
-    // 获取当前查询日期的数据
-    const dateInput = document.getElementById('date').value;
+    let dateInput = document.getElementById('date').value;
+    if (!dateInput && allData.length > 0) {
+        const latest = findLatestDateForProduct();
+        if (latest) {
+            document.getElementById('date').value = latest;
+            dateInput = latest;
+        }
+    }
     if (!dateInput) return;
-    
+
     const dateStr = dateInput.replace(/-/g, '');
     
     // 获取指定日期的所有合约数据（按合约和期货公司去重）
     const contractBrokerMap = new Map();
     
+    const rowDateYmd = (dt) => (dt && typeof dt === 'string') ? (dt.length >= 8 ? dt.substring(0, 8) : dt) : '';
     allData.forEach(row => {
-        // 只处理指定日期的数据
-        if (row.datetime !== dateStr) return;
+        if (rowDateYmd(row.datetime) !== dateStr) return;
         
         const contractSymbol = row.symbol;
         const broker = row.broker;
