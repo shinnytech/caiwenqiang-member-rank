@@ -15,9 +15,9 @@ let availableDateSet = new Set();
 // 日期选择器实例（flatpickr）
 let datePickerInstance = null;
 
-// 饼状图颜色配置
+// 快期风格：蓝/灰/绿金融配色（无紫色）
 const chartColors = [
-    '#667eea', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#a8edea', '#fed6e3', '#d299c2'
+    '#2563eb', '#64748b', '#16a34a', '#0ea5e9', '#475569', '#0d9488', '#f59e0b', '#dc2626', '#6366f1', '#0891b2'
 ];
 
 // 优化的CSV解析函数（更快）
@@ -1111,8 +1111,8 @@ function renderTrendChart(symbol) {
                 {
                     label: '总多头',
                     data: totalLongData,
-                    borderColor: '#2196F3',
-                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
@@ -1123,8 +1123,8 @@ function renderTrendChart(symbol) {
                 {
                     label: '总空头',
                     data: totalShortData,
-                    borderColor: '#4CAF50',
-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                    borderColor: '#16a34a',
+                    backgroundColor: 'rgba(22, 163, 74, 0.08)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
@@ -1135,8 +1135,8 @@ function renderTrendChart(symbol) {
                 {
                     label: '收盘价',
                     data: priceData,
-                    borderColor: '#F44336',
-                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(220, 38, 38, 0.08)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
@@ -1213,8 +1213,8 @@ function renderTrendChart(symbol) {
                 {
                     label: '总多头',
                     data: totalLongData,
-                    borderColor: '#2196F3',
-                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
@@ -1225,8 +1225,8 @@ function renderTrendChart(symbol) {
                 {
                     label: '总空头',
                     data: totalShortData,
-                    borderColor: '#4CAF50',
-                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                    borderColor: '#16a34a',
+                    backgroundColor: 'rgba(22, 163, 74, 0.08)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
@@ -1238,8 +1238,8 @@ function renderTrendChart(symbol) {
                     type: 'bar',
                     label: '净持仓',
                     data: netPositionData,
-                    backgroundColor: netPositionData.map(v => v >= 0 ? 'rgba(255, 193, 7, 0.6)' : 'rgba(255, 87, 34, 0.6)'),
-                    borderColor: netPositionData.map(v => v >= 0 ? 'rgba(255, 193, 7, 1)' : 'rgba(255, 87, 34, 1)'),
+                    backgroundColor: netPositionData.map(v => v >= 0 ? 'rgba(22, 163, 74, 0.5)' : 'rgba(220, 38, 38, 0.5)'),
+                    borderColor: netPositionData.map(v => v >= 0 ? 'rgba(22, 163, 74, 1)' : 'rgba(220, 38, 38, 1)'),
                     borderWidth: 1,
                     yAxisID: 'y',
                     order: 1
@@ -1247,8 +1247,8 @@ function renderTrendChart(symbol) {
                 {
                     label: '收盘价',
                     data: priceData,
-                    borderColor: '#F44336',
-                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(220, 38, 38, 0.08)',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.4,
@@ -1784,8 +1784,8 @@ function renderBrokerTrendChart(brokerName) {
                 {
                     label: '多头持仓',
                     data: longData,
-                    borderColor: '#4facfe',
-                    backgroundColor: 'rgba(79, 172, 254, 0.1)',
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
                     fill: false,
                     tension: 0.2,
                     pointRadius: 2,
@@ -1794,8 +1794,8 @@ function renderBrokerTrendChart(brokerName) {
                 {
                     label: '空头持仓',
                     data: shortData,
-                    borderColor: '#43e97b',
-                    backgroundColor: 'rgba(67, 233, 123, 0.1)',
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(220, 38, 38, 0.08)',
                     fill: false,
                     tension: 0.2,
                     pointRadius: 2,
@@ -1804,8 +1804,8 @@ function renderBrokerTrendChart(brokerName) {
                 {
                     label: '净持仓',
                     data: netData,
-                    borderColor: '#fee140',
-                    backgroundColor: 'rgba(254, 225, 64, 0.1)',
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
                     fill: false,
                     tension: 0.2,
                     borderWidth: 2,
@@ -1975,15 +1975,15 @@ function renderBrokerCrossPeriodChart(brokerName) {
                 {
                     label: '本合约多头 vs 他月空头',
                     data: crossLongData,
-                    backgroundColor: '#fa709a',
-                    borderColor: '#fa709a',
+                    backgroundColor: '#2563eb',
+                    borderColor: '#2563eb',
                     borderWidth: 1
                 },
                 {
                     label: '本合约空头 vs 他月多头',
                     data: crossShortData,
-                    backgroundColor: '#43e97b',
-                    borderColor: '#43e97b',
+                    backgroundColor: '#16a34a',
+                    borderColor: '#16a34a',
                     borderWidth: 1
                 }
             ]
