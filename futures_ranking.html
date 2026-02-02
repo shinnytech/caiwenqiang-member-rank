@@ -80,7 +80,14 @@
                 <div id="analysis-charts" class="analysis-section">
                     <div class="analysis-chart-card">
                         <div class="chart-header">
-                            <h2>合约多空持仓趋势 (近3个月)</h2>
+                            <div class="chart-header-left">
+                                <h2 id="trend-chart-title">合约多空持仓趋势 (前三月)</h2>
+                            </div>
+                            <div class="chart-header-right">
+                                <button class="range-btn" data-range="week" onclick="setTrendChartRange('week')">前一周</button>
+                                <button class="range-btn" data-range="month" onclick="setTrendChartRange('month')">前一月</button>
+                                <button class="range-btn active" data-range="quarter" onclick="setTrendChartRange('quarter')">前三月</button>
+                            </div>
                         </div>
                         <div class="chart-wrapper">
                             <canvas id="trendChart"></canvas>
@@ -109,8 +116,9 @@
                                 <h2>持仓趋势图</h2>
                             </div>
                             <div class="chart-header-right">
-                                <button class="range-btn" onclick="setBrokerTrendRange(1)">近1个月</button>
-                                <button class="range-btn active" onclick="setBrokerTrendRange(3)">近3个月</button>
+                                <button class="range-btn" data-range="week" onclick="setBrokerTrendRange('week')">前一周</button>
+                                <button class="range-btn" data-range="month" onclick="setBrokerTrendRange('month')">前一月</button>
+                                <button class="range-btn active" data-range="quarter" onclick="setBrokerTrendRange('quarter')">前三月</button>
                             </div>
                         </div>
                         <div class="chart-wrapper">

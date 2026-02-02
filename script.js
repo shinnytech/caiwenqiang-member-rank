@@ -3,8 +3,10 @@ let csvDataPrev = [];
 let allData = [];          // 全市场合约+期货公司数据（用于持仓排行榜）
 let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
 let trendChart = null;     // 趋势图表实例
-// 公司持仓分析页：持仓趋势图的时间窗口（单位：月），默认近3个月
-let brokerTrendRangeMonths = 3;
+// 持仓排行榜页：合约多空持仓趋势图时间范围 'week'|'month'|'quarter'
+let trendChartRange = 'quarter';
+// 公司持仓分析页：持仓趋势图时间范围 'week'|'month'|'quarter'
+let brokerTrendRange = 'quarter';
 
 // 当前选择（品种 + 合约）下可用的交易日期集合（字符串形式：YYYYMMDD）
 let availableDateSet = new Set();
@@ -924,27 +926,71 @@ function renderAnalysisCharts() {
     renderCrossPeriodTable();
 }
 
-// 渲染趋势图（近3个月）
+// 根据范围计算起止日期（endDate 为终点，往前推）
+function getTrendStartEnd(range, endDate) {
+    const end = endDate ? new Date(endDate) : new Date();
+    const start = new Date(end);
+    if (range === 'week') {
+        start.setDate(start.getDate() - 7);
+    } else if (range === 'month') {
+        start.setMonth(start.getMonth() - 1);
+    } else {
+        start.setMonth(start.getMonth() - 3);
+    }
+    return { startDate: start, endDate: end };
+}
+
+// 格式化为 YYYYMMDD，避免 Date 比较的时区/时间导致边界错误
+function dateToYmd(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return '' + y + m + day;
+}
+
+// 切换合约多空持仓趋势图时间范围（前一周 / 前一月 / 前三月）
+function setTrendChartRange(range) {
+    trendChartRange = range || 'quarter';
+    const titleEl = document.getElementById('trend-chart-title');
+    const labels = { week: '前一周', month: '前一月', quarter: '前三月' };
+    if (titleEl) titleEl.textContent = `合约多空持仓趋势 (${labels[trendChartRange]})`;
+    document.querySelectorAll('#analysis-charts .chart-header-right .range-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-range') === trendChartRange);
+    });
+    const contractSelect = document.getElementById('contract');
+    const symbol = contractSelect ? contractSelect.value.trim() : (allData.length ? allData[0].symbol : '');
+    renderTrendChart(symbol);
+}
+
+// 渲染趋势图（按前一周/前一月/前三月）
 function renderTrendChart(symbol) {
     if (!symbol) return;
     
-    // 获取近3个月的数据
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() - 3);
+    // 以日期选择器的日期为终点；若为空则用该合约在 allData 中的最新日期
+    const dateInput = document.getElementById('date');
+    let endDateForRange = null;
+    if (dateInput && dateInput.value && dateInput.value.trim()) {
+        endDateForRange = new Date(dateInput.value.trim().replace(/-/g, '/'));
+    }
+    if (!endDateForRange || isNaN(endDateForRange.getTime())) {
+        const maxDt = allData.reduce((max, row) => {
+            if (row.symbol !== symbol || !row.datetime) return max;
+            return row.datetime > max ? row.datetime : max;
+        }, '');
+        if (maxDt) endDateForRange = new Date(maxDt.substring(0, 4), parseInt(maxDt.substring(4, 6), 10) - 1, parseInt(maxDt.substring(6, 8), 10));
+        else endDateForRange = new Date();
+    }
+    const { startDate, endDate } = getTrendStartEnd(trendChartRange, endDateForRange);
+    const startYmd = dateToYmd(startDate);
+    const endYmd = dateToYmd(endDate);
     
-    // 过滤数据：指定合约，近3个月
+    // 过滤数据：指定合约，时间范围内（用 YYYYMMDD 字符串比较，避免时区/时间边界问题）
     const filteredData = allData.filter(row => {
         if (row.symbol !== symbol) return false;
-        if (!row.datetime) return false;
-        
-        const rowDate = new Date(
-            parseInt(row.datetime.substring(0, 4)),
-            parseInt(row.datetime.substring(4, 6)) - 1,
-            parseInt(row.datetime.substring(6, 8))
-        );
-        
-        return rowDate >= startDate && rowDate <= endDate;
+        const dt = row.datetime;
+        if (!dt || typeof dt !== 'string') return false;
+        const ymd = dt.length >= 8 ? dt.substring(0, 8) : dt;
+        return ymd >= startYmd && ymd <= endYmd;
     });
     
     // 按日期和期货公司聚合数据（避免重复计算）
@@ -1489,14 +1535,15 @@ function updateBrokerDetail(brokerName) {
     renderBrokerCrossPeriodChart(brokerName);
 }
 
-// 切换期货公司持仓趋势图时间范围（1个月 / 3个月等）
-function setBrokerTrendRange(months) {
-    brokerTrendRangeMonths = months;
+// 切换期货公司持仓趋势图时间范围（前一周 / 前一月 / 前三月）
+function setBrokerTrendRange(range) {
+    brokerTrendRange = range || 'quarter';
+    document.querySelectorAll('.broker-chart-card .chart-header-right .range-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-range') === brokerTrendRange);
+    });
     const brokerSelectHeader = document.getElementById('broker-select-header');
     const brokerName = brokerSelectHeader ? brokerSelectHeader.value : '';
-    if (brokerName) {
-        renderBrokerTrendChart(brokerName);
-    }
+    if (brokerName) renderBrokerTrendChart(brokerName);
 }
 
 // 清空期货公司图表
@@ -1616,23 +1663,19 @@ function renderBrokerTrendChart(brokerName) {
     // 选择数据源：如果已加载期货公司专用数据，则优先使用；否则回退到全量数据
     const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
 
-    // 筛选该期货公司在近 N 个月内的数据
-    const endDate = new Date(date);
-    const startDate = new Date(endDate);
-    const range = brokerTrendRangeMonths && brokerTrendRangeMonths > 0 ? brokerTrendRangeMonths : 3;
-    startDate.setMonth(startDate.getMonth() - range);
+    // 筛选该期货公司在所选时间范围内的数据（用 YYYYMMDD 字符串比较）
+    const endDateObj = new Date(date.replace(/-/g, '/'));
+    const { startDate, endDate } = getTrendStartEnd(brokerTrendRange || 'quarter', endDateObj);
+    const startYmd = dateToYmd(startDate);
+    const endYmd = dateToYmd(endDate);
 
     const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
         if (symbol && row.symbol !== symbol) return false;
-        if (!row.datetime) return false;
-        const d = row.datetime;
-        const rowDate = new Date(
-            parseInt(d.substring(0, 4)),
-            parseInt(d.substring(4, 6)) - 1,
-            parseInt(d.substring(6, 8))
-        );
-        return rowDate >= startDate && rowDate <= endDate;
+        const dt = row.datetime;
+        if (!dt || typeof dt !== 'string') return false;
+        const ymd = dt.length >= 8 ? dt.substring(0, 8) : dt;
+        return ymd >= startYmd && ymd <= endYmd;
     });
     
     if (brokerData.length === 0) {
