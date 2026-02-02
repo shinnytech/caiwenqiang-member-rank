@@ -7,6 +7,8 @@ let trendChart = null;     // 趋势图表实例
 let trendChartRange = 'quarter';
 // 公司持仓分析页：持仓趋势图时间范围 'week'|'month'|'quarter'
 let brokerTrendRange = 'quarter';
+// 公司持仓分析页：是否显示趋势图下方数据表格，默认显示
+let brokerTrendTableVisible = true;
 
 // 当前选择（品种 + 合约）下可用的交易日期集合（字符串形式：YYYYMMDD）
 let availableDateSet = new Set();
@@ -1578,6 +1580,15 @@ function setBrokerTrendRange(range) {
     if (brokerName) renderBrokerTrendChart(brokerName);
 }
 
+// 切换公司持仓分析页「持仓趋势图」下方表格的显示/隐藏
+function toggleBrokerTrendTable() {
+    brokerTrendTableVisible = !brokerTrendTableVisible;
+    const tableEl = document.getElementById('broker-trend-table');
+    const btn = document.getElementById('broker-trend-table-toggle');
+    if (tableEl) tableEl.style.display = brokerTrendTableVisible ? '' : 'none';
+    if (btn) btn.textContent = brokerTrendTableVisible ? '隐藏表格' : '显示表格';
+}
+
 // 清空期货公司图表
 function clearBrokerCharts() {
     const trendCanvas = document.getElementById('brokerTrendChart');
@@ -1591,7 +1602,9 @@ function clearBrokerCharts() {
             window.brokerTrendChartInstance = null;
         }
     }
-    
+    const brokerTrendTable = document.getElementById('broker-trend-table');
+    if (brokerTrendTable) brokerTrendTable.innerHTML = '';
+
     if (crossPeriodCanvas) {
         const ctx = crossPeriodCanvas.getContext('2d');
         ctx.clearRect(0, 0, crossPeriodCanvas.width, crossPeriodCanvas.height);
@@ -1716,18 +1729,16 @@ function renderBrokerTrendChart(brokerName) {
         ctx.font = '16px Arial';
         ctx.textAlign = 'center';
         ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        const tableEl = document.getElementById('broker-trend-table');
+        if (tableEl) {
+            tableEl.innerHTML = '<div class="loading">暂无数据</div>';
+            tableEl.style.display = brokerTrendTableVisible ? '' : 'none';
+        }
+        const toggleBtn = document.getElementById('broker-trend-table-toggle');
+        if (toggleBtn) toggleBtn.textContent = brokerTrendTableVisible ? '隐藏表格' : '显示表格';
         return;
     }
 
-    if (brokerData.length === 0) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#666';
-        ctx.font = '16px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
-        return;
-    }
-    
     // 按交易日聚合到“每日一条”，避免同一天多条记录导致折线图出现竖直锯齿
     const dateAggMap = new Map();
     brokerData.forEach(row => {
@@ -1746,6 +1757,9 @@ function renderBrokerTrendChart(brokerName) {
     });
 
     const aggArr = Array.from(dateAggMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    // 渲染趋势图对应的数据表格
+    renderBrokerTrendTable(aggArr);
 
     // 准备图表数据
     const labels = aggArr.map(d => {
@@ -1825,6 +1839,45 @@ function renderBrokerTrendChart(brokerName) {
             }
         }
     });
+}
+
+// 渲染持仓趋势图对应的数据表格（日期、多头、空头、净持仓）
+function renderBrokerTrendTable(aggArr) {
+    const container = document.getElementById('broker-trend-table');
+    if (!container) return;
+    if (!aggArr || aggArr.length === 0) {
+        container.innerHTML = '<div class="loading">暂无数据</div>';
+        return;
+    }
+    let html = `
+        <table class="cross-period-table">
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>多头持仓</th>
+                    <th>空头持仓</th>
+                    <th>净持仓</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    aggArr.forEach(d => {
+        const dateStr = `${d.date.substring(0, 4)}-${d.date.substring(4, 6)}-${d.date.substring(6, 8)}`;
+        const net = d.long - d.short;
+        html += `
+            <tr>
+                <td>${dateStr}</td>
+                <td>${(d.long || 0).toLocaleString()}</td>
+                <td>${(d.short || 0).toLocaleString()}</td>
+                <td>${net.toLocaleString()}</td>
+            </tr>
+        `;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+    container.style.display = brokerTrendTableVisible ? '' : 'none';
+    const toggleBtn = document.getElementById('broker-trend-table-toggle');
+    if (toggleBtn) toggleBtn.textContent = brokerTrendTableVisible ? '隐藏表格' : '显示表格';
 }
 
 // 渲染期货公司跨期持仓分布图（优先使用期货公司专用CSV数据）

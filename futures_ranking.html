@@ -116,6 +116,7 @@
                                 <h2>持仓趋势图</h2>
                             </div>
                             <div class="chart-header-right">
+                                <button type="button" class="range-btn" id="broker-trend-table-toggle" onclick="toggleBrokerTrendTable()" title="切换表格显示">隐藏表格</button>
                                 <button class="range-btn" data-range="week" onclick="setBrokerTrendRange('week')">前一周</button>
                                 <button class="range-btn" data-range="month" onclick="setBrokerTrendRange('month')">前一月</button>
                                 <button class="range-btn active" data-range="quarter" onclick="setBrokerTrendRange('quarter')">前三月</button>
@@ -124,6 +125,7 @@
                         <div class="chart-wrapper">
                             <canvas id="brokerTrendChart"></canvas>
                         </div>
+                        <div id="broker-trend-table" class="table-wrapper" style="margin-top: 1rem;"></div>
                     </div>
                     <div class="broker-chart-card">
                         <div class="chart-header">
