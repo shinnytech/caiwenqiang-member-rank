@@ -310,6 +310,10 @@ body {
     height: 380px;
 }
 
+.chart-wrapper-sm {
+    height: 320px;
+}
+
 .table-wrapper {
     padding: 16px 20px;
     overflow-x: auto;
@@ -320,6 +324,27 @@ body {
     max-height: 380px;
     overflow: auto;
 }
+
+.table-wrapper-scroll {
+    max-height: 420px;
+    overflow: auto;
+}
+
+.cross-period-broker-table th,
+.cross-period-broker-table td {
+    white-space: nowrap;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+.cross-period-broker-table .cell-net-long {
+    color: var(--kq-positive);
+    text-align: right;
+}
+.cross-period-broker-table .cell-net-short {
+    color: var(--kq-negative);
+    text-align: right;
+}
+
 
 .broker-trend-table th:not(:first-child),
 .broker-trend-table td:not(:first-child) {

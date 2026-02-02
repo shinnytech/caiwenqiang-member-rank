@@ -2,7 +2,7 @@ let csvData = [];
 let csvDataPrev = [];
 let allData = [];          // 全市场合约+期货公司数据（用于持仓排行榜）
 let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
-let trendChart = null;     // 趋势图表实例
+let trendChart = null;           // 趋势图表实例
 // 持仓排行榜页：合约多空持仓趋势图时间范围 'week'|'month'|'quarter'
 let trendChartRange = 'quarter';
 // 公司持仓分析页：持仓趋势图时间范围 'week'|'month'|'quarter'
@@ -918,8 +918,10 @@ function renderAnalysisCharts() {
     const symbol = selectedContract || (allData.length > 0 ? allData[0].symbol : '');
     renderTrendChart(symbol);
     
-    // 渲染跨期净持仓表格（显示该品种下所有合约）
+    // 跨期净持仓表格（按合约汇总）
     renderCrossPeriodTable();
+    // 按会员跨期净持仓表（会员 x 各合约净多仓/净空仓）
+    renderCrossPeriodBrokerTable();
 }
 
 // 根据范围计算起止日期（endDate 为终点，往前推；统一用天数避免 setMonth 月末溢出）
@@ -1368,6 +1370,85 @@ function renderCrossPeriodTable() {
     `;
     
     document.getElementById('cross-period-table').innerHTML = tableHTML;
+}
+
+// 按会员跨期净持仓表：行=会员简称，列=各合约的净多仓/净空仓
+function renderCrossPeriodBrokerTable() {
+    const container = document.getElementById('cross-period-broker-table');
+    if (!container) return;
+    let dateInput = document.getElementById('date').value;
+    if (!dateInput && allData.length > 0) {
+        const latest = findLatestDateForProduct();
+        if (latest) dateInput = latest;
+    }
+    if (!dateInput) {
+        container.innerHTML = '<div class="loading">请选择日期</div>';
+        return;
+    }
+    const dateStr = dateInput.replace(/-/g, '');
+    const rowDateYmd = (dt) => (dt && typeof dt === 'string') ? (dt.length >= 8 ? dt.substring(0, 8) : dt) : '';
+    const rows = allData.filter(row => rowDateYmd(row.datetime) === dateStr);
+    if (rows.length === 0) {
+        container.innerHTML = '<div class="loading">暂无数据</div>';
+        return;
+    }
+    const brokerSymbolMap = new Map();
+    rows.forEach(row => {
+        const key = `${row.broker}_${row.symbol}`;
+        const long = parseFloat(row.long_oi) || 0;
+        const short = parseFloat(row.short_oi) || 0;
+        if (!brokerSymbolMap.has(key)) {
+            brokerSymbolMap.set(key, { broker: row.broker, symbol: row.symbol, long_oi: 0, short_oi: 0 });
+        }
+        const item = brokerSymbolMap.get(key);
+        item.long_oi = Math.max(item.long_oi, long);
+        item.short_oi = Math.max(item.short_oi, short);
+    });
+    const brokerSet = new Set();
+    const symbolList = [];
+    const symbolSet = new Set();
+    brokerSymbolMap.forEach(item => {
+        brokerSet.add(item.broker);
+        if (!symbolSet.has(item.symbol)) {
+            symbolSet.add(item.symbol);
+            symbolList.push(item.symbol);
+        }
+    });
+    symbolList.sort((a, b) => {
+        const am = a.match(/(\d{4})/);
+        const bm = b.match(/(\d{4})/);
+        if (am && bm) return am[1].localeCompare(bm[1]);
+        return a.localeCompare(b);
+    });
+    const brokerList = Array.from(brokerSet).sort();
+    const toShortSymbol = (s) => (s && s.indexOf('.') >= 0) ? s.split('.')[1] : s;
+    const matrix = new Map();
+    brokerSymbolMap.forEach(item => {
+        const netLong = Math.max(0, item.long_oi - item.short_oi);
+        const netShort = Math.max(0, item.short_oi - item.long_oi);
+        if (netLong === 0 && netShort === 0) return;
+        if (!matrix.has(item.broker)) matrix.set(item.broker, new Map());
+        matrix.get(item.broker).set(item.symbol, { netLong, netShort });
+    });
+    let html = '<table class="cross-period-table cross-period-broker-table"><thead><tr><th>会员简称</th>';
+    symbolList.forEach(sym => {
+        const shortSym = toShortSymbol(sym);
+        html += `<th>${shortSym}净多仓</th><th>${shortSym}净空仓</th>`;
+    });
+    html += '</tr></thead><tbody>';
+    brokerList.forEach(broker => {
+        html += `<tr><td>${broker}</td>`;
+        symbolList.forEach(sym => {
+            const cell = matrix.get(broker) && matrix.get(broker).get(sym);
+            const netLong = cell ? cell.netLong : 0;
+            const netShort = cell ? cell.netShort : 0;
+            html += `<td class="cell-net-long">${netLong > 0 ? netLong.toLocaleString() : '-'}</td>`;
+            html += `<td class="cell-net-short">${netShort > 0 ? netShort.toLocaleString() : '-'}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 // 页面切换函数
