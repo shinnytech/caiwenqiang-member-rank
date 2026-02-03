@@ -3,6 +3,7 @@ let csvDataPrev = [];
 let allData = [];          // 全市场合约+期货公司数据（用于持仓排行榜）
 let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
 let trendChart = null;           // 趋势图表实例
+let netPositionTrendChart = null; // 前5/前10/前20净持仓趋势图实例
 // 持仓排行榜页：合约多空持仓趋势图时间范围 'week'|'month'|'quarter'
 let trendChartRange = 'quarter';
 // 公司持仓分析页：持仓趋势图时间范围 'week'|'month'|'quarter'
@@ -917,6 +918,7 @@ function renderAnalysisCharts() {
     // 渲染趋势图（使用选中的合约，如果没有选中则使用第一个合约）
     const symbol = selectedContract || (allData.length > 0 ? allData[0].symbol : '');
     renderTrendChart(symbol);
+    renderNetPositionTrendChart(symbol);
     
     // 跨期净持仓表格（按合约汇总）
     renderCrossPeriodTable();
@@ -948,15 +950,13 @@ function dateToYmd(d) {
 // 切换合约多空持仓趋势图时间范围（前一周 / 前一月 / 前三月）
 function setTrendChartRange(range) {
     trendChartRange = range || 'quarter';
-    const titleEl = document.getElementById('trend-chart-title');
-    const labels = { week: '前一周', month: '前一月', quarter: '前三月' };
-    if (titleEl) titleEl.textContent = `合约多空持仓趋势 (${labels[trendChartRange]})`;
     document.querySelectorAll('#analysis-charts .chart-header-right .range-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-range') === trendChartRange);
     });
     const contractSelect = document.getElementById('contract');
     const symbol = contractSelect ? contractSelect.value.trim() : (allData.length ? allData[0].symbol : '');
     renderTrendChart(symbol);
+    renderNetPositionTrendChart(symbol);
 }
 
 // 渲染趋势图（按前一周/前一月/前三月）
@@ -1224,6 +1224,206 @@ function renderTrendChart(symbol) {
                     title: { display: true, text: '价格' },
                     grid: { drawOnChartArea: false },
                     beginAtZero: false,
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
+                }
+            }
+        }
+    });
+}
+
+// 渲染前5 / 前10 / 前20 净持仓趋势图（与合约多空趋势同时间范围；按日汇总各会员净持仓后取前5/10/20合计，与排行榜一致）
+function renderNetPositionTrendChart(symbol) {
+    if (!symbol && allData.length) symbol = allData[0].symbol;
+    if (!symbol) return;
+
+    const dateInput = document.getElementById('date');
+    let endDateForRange = null;
+    if (dateInput && dateInput.value && dateInput.value.trim()) {
+        endDateForRange = new Date(dateInput.value.trim().replace(/-/g, '/'));
+    }
+    if (!endDateForRange || isNaN(endDateForRange.getTime())) {
+        const maxDt = allData.reduce((max, row) => {
+            if (row.symbol !== symbol || !row.datetime) return max;
+            return row.datetime > max ? row.datetime : max;
+        }, '');
+        if (maxDt) endDateForRange = new Date(maxDt.substring(0, 4), parseInt(maxDt.substring(4, 6), 10) - 1, parseInt(maxDt.substring(6, 8), 10));
+        else endDateForRange = new Date();
+    }
+    const { startDate, endDate } = getTrendStartEnd(trendChartRange, endDateForRange);
+    const startYmd = dateToYmd(startDate);
+    const endYmd = dateToYmd(endDate);
+
+    const filteredData = allData.filter(row => {
+        if (row.symbol !== symbol) return false;
+        const dt = row.datetime;
+        if (!dt || typeof dt !== 'string') return false;
+        const ymd = dt.length >= 8 ? dt.substring(0, 8) : dt;
+        return ymd >= startYmd && ymd <= endYmd;
+    });
+
+    const dateBrokerMap = new Map();
+    filteredData.forEach(row => {
+        const date = row.datetime;
+        const broker = row.broker;
+        const key = `${date}_${broker}`;
+        if (!dateBrokerMap.has(key)) {
+            dateBrokerMap.set(key, { date: date, broker: broker, long_oi: 0, short_oi: 0 });
+        }
+        const item = dateBrokerMap.get(key);
+        item.long_oi = Math.max(item.long_oi, parseFloat(row.long_oi) || 0);
+        item.short_oi = Math.max(item.short_oi, parseFloat(row.short_oi) || 0);
+    });
+
+    const dateList = [];
+    const byDate = new Map();
+    const dateTotals = new Map(); // 每日总多头/总空头，用于模拟收盘价
+    dateBrokerMap.forEach(item => {
+        const date = item.date;
+        if (!byDate.has(date)) {
+            dateList.push(date);
+            byDate.set(date, []);
+            dateTotals.set(date, { totalLong: 0, totalShort: 0 });
+        }
+        const net = item.long_oi - item.short_oi;
+        byDate.get(date).push({ broker: item.broker, net: net });
+        const tot = dateTotals.get(date);
+        tot.totalLong += item.long_oi;
+        tot.totalShort += item.short_oi;
+    });
+    dateList.sort((a, b) => a.localeCompare(b));
+
+    const top5Data = [];
+    const top10Data = [];
+    const top20Data = [];
+    const priceData = [];
+    const basePrice = 3500; // 与合约多空趋势图一致用净持仓模拟价格（螺纹等可调）
+    dateList.forEach(date => {
+        const arr = byDate.get(date).slice();
+        arr.sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+        let sum5 = 0, sum10 = 0, sum20 = 0;
+        for (let i = 0; i < arr.length; i++) {
+            if (i < 5) sum5 += arr[i].net;
+            if (i < 10) sum10 += arr[i].net;
+            if (i < 20) sum20 += arr[i].net;
+        }
+        top5Data.push(sum5);
+        top10Data.push(sum10);
+        top20Data.push(sum20);
+        const tot = dateTotals.get(date);
+        const net = (tot && (tot.totalLong !== undefined)) ? (tot.totalLong - tot.totalShort) : 0;
+        priceData.push(basePrice + net / 1000);
+    });
+
+    const labels = dateList.map(d => `${d.substring(0, 4)}-${d.substring(4, 6)}-${d.substring(6, 8)}`).slice(-90);
+
+    const canvas = document.getElementById('netPositionTrendChart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    if (dateList.length === 0) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        if (netPositionTrendChart) {
+            netPositionTrendChart.destroy();
+            netPositionTrendChart = null;
+        }
+        return;
+    }
+
+    if (netPositionTrendChart) {
+        netPositionTrendChart.destroy();
+        netPositionTrendChart = null;
+    }
+
+    const productName = (currentProduct || '').split('_')[1] || symbol.split('.')[1] || symbol;
+    netPositionTrendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: productName + ': 前5名净持仓合计',
+                    data: top5Data.slice(-90),
+                    borderColor: '#0d9488',
+                    backgroundColor: 'rgba(13, 148, 136, 0.08)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: productName + ': 前10名净持仓合计',
+                    data: top10Data.slice(-90),
+                    borderColor: '#2563eb',
+                    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: productName + ': 前20名净持仓合计',
+                    data: top20Data.slice(-90),
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: '收盘价',
+                    data: priceData.slice(-90),
+                    borderColor: '#dc2626',
+                    backgroundColor: 'rgba(220, 38, 38, 0.08)',
+                    borderWidth: 2,
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: true, position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            const v = ctx.parsed.y;
+                            if (ctx.dataset.yAxisID === 'y1') return (ctx.dataset.label || '') + ': ' + v.toLocaleString() + ' 元/吨';
+                            return (ctx.dataset.label || '') + ': ' + v.toLocaleString() + ' 手';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    title: { display: true, text: '日期' },
+                    ticks: { maxRotation: 45, minRotation: 45, maxTicksLimit: 15 }
+                },
+                y: {
+                    display: true,
+                    position: 'left',
+                    title: { display: true, text: '净持仓 (手)' },
+                    ticks: { callback: function(v) { return v.toLocaleString(); } }
+                },
+                y1: {
+                    display: true,
+                    position: 'right',
+                    title: { display: true, text: '元/吨' },
+                    grid: { drawOnChartArea: false },
                     ticks: { callback: function(v) { return v.toLocaleString(); } }
                 }
             }
@@ -1586,7 +1786,8 @@ function toggleBrokerTrendTable() {
 // 清空期货公司图表
 function clearBrokerCharts() {
     const trendCanvas = document.getElementById('brokerTrendChart');
-    const crossPeriodCanvas = document.getElementById('brokerCrossPeriodChart');
+    const longCanvas = document.getElementById('brokerCrossPeriodChartLong');
+    const shortCanvas = document.getElementById('brokerCrossPeriodChartShort');
     
     if (trendCanvas) {
         const ctx = trendCanvas.getContext('2d');
@@ -1599,14 +1800,22 @@ function clearBrokerCharts() {
     const brokerTrendTable = document.getElementById('broker-trend-table');
     if (brokerTrendTable) brokerTrendTable.innerHTML = '';
 
-    if (crossPeriodCanvas) {
-        const ctx = crossPeriodCanvas.getContext('2d');
-        ctx.clearRect(0, 0, crossPeriodCanvas.width, crossPeriodCanvas.height);
-        if (window.brokerCrossPeriodChartInstance) {
-            window.brokerCrossPeriodChartInstance.destroy();
-            window.brokerCrossPeriodChartInstance = null;
+    [longCanvas, shortCanvas].forEach(canvas => {
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
+    });
+    if (window.brokerCrossPeriodChartLongInstance) {
+        window.brokerCrossPeriodChartLongInstance.destroy();
+        window.brokerCrossPeriodChartLongInstance = null;
     }
+    if (window.brokerCrossPeriodChartShortInstance) {
+        window.brokerCrossPeriodChartShortInstance.destroy();
+        window.brokerCrossPeriodChartShortInstance = null;
+    }
+    const summaryEl = document.getElementById('broker-cross-period-summary');
+    if (summaryEl) summaryEl.innerHTML = '';
 }
 
 // 控制项变化事件（合约代码、日期、期货公司）
@@ -1949,143 +2158,163 @@ function renderBrokerTrendTable(aggArr) {
     if (toggleBtn) toggleBtn.textContent = brokerTrendTableVisible ? '隐藏表格' : '显示表格';
 }
 
-// 渲染期货公司跨期持仓分布图（优先使用期货公司专用CSV数据）
+// 合约显示简称：2605 -> 05，rb2605 -> 05（取最后两位月份）
+function contractShortName(contract) {
+    const m = (contract || '').match(/(\d{2})$/);
+    return m ? m[1] : (contract || '');
+}
+
+// 完整合约名用于 X 轴：rb2601 / 2601 -> rb2601（无品种前缀时用当前品种补全）
+function fullContractName(contract) {
+    if (!contract) return '';
+    if (/^[a-z]+/i.test(String(contract))) return String(contract);
+    const product = (currentProduct || '').split('_')[1] || 'rb';
+    return product + contract;
+}
+
+// 渲染期货公司跨期持仓对比图（照抄参考：左图 05多仓 vs 各月空仓 竖条，右图 05空仓 vs 各月多仓 竖条）
 function renderBrokerCrossPeriodChart(brokerName) {
-    const canvas = document.getElementById('brokerCrossPeriodChart');
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    
-    // 获取当前选中的日期（输入框是 YYYY-MM-DD，需要转成 CSV 中的 YYYYMMDD）
+    const canvasLong = document.getElementById('brokerCrossPeriodChartLong');
+    const canvasShort = document.getElementById('brokerCrossPeriodChartShort');
+    if (!canvasLong || !canvasShort) return;
+
     const dateInput = document.getElementById('date').value;
     if (!dateInput) return;
-    const dateStr = dateInput.replace(/-/g, '');
-    
-    // 获取该期货公司在所有合约的数据（当前日期）
+    const dateStr = String(dateInput).replace(/-/g, '').substring(0, 8);
+
     const sourceData = (brokerDataAll && brokerDataAll.length > 0) ? brokerDataAll : allData;
     const brokerData = sourceData.filter(row => {
         if (row.broker !== brokerName) return false;
-        if (!row.datetime) return false;
-        return row.datetime === dateStr;
+        const rowDate = String(row.datetime || '').replace(/-/g, '').substring(0, 8);
+        return rowDate === dateStr;
     });
-    
-    if (brokerData.length === 0) {
+
+    const showNoData = (canvas, msg) => {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#666';
-        ctx.font = '16px Arial';
+        ctx.font = '14px Arial, "Microsoft YaHei"';
         ctx.textAlign = 'center';
-        ctx.fillText('暂无数据', canvas.width / 2, canvas.height / 2);
+        ctx.fillText(msg || '暂无数据', canvas.width / 2, canvas.height / 2);
+    };
+
+    if (brokerData.length === 0) {
+        showNoData(canvasLong, '暂无数据，请选择日期并确保已加载该公司数据');
+        showNoData(canvasShort, '');
+        const summaryEl = document.getElementById('broker-cross-period-summary');
+        if (summaryEl) summaryEl.textContent = '未找到 ' + brokerName + ' 在所选日期的多合约持仓数据';
         return;
     }
-    
-    // 按合约分组
+
     const contractMap = new Map();
     brokerData.forEach(row => {
-        const contract = row.instrument_id || row.symbol.split('.').pop();
+        const contract = (row.instrument_id || (row.symbol && row.symbol.split('.').pop()) || '').trim();
+        if (!contract) return;
+        const longVal = parseFloat(row.long_oi) || 0;
+        const shortVal = parseFloat(row.short_oi) || 0;
         if (!contractMap.has(contract)) {
-            contractMap.set(contract, {
-                contract: contract,
-                long: 0,
-                short: 0
-            });
+            contractMap.set(contract, { contract: contract, long: 0, short: 0 });
         }
         const data = contractMap.get(contract);
-        data.long += parseFloat(row.long_oi) || 0;
-        data.short += parseFloat(row.short_oi) || 0;
+        data.long = Math.max(data.long, longVal);
+        data.short = Math.max(data.short, shortVal);
     });
-    
-    // 转换为数组并按合约排序
+
     const contracts = Array.from(contractMap.values()).sort((a, b) => {
-        // 提取数字部分进行排序
-        const numA = parseInt(a.contract.match(/\d+/)?.[0] || '0');
-        const numB = parseInt(b.contract.match(/\d+/)?.[0] || '0');
+        const numA = parseInt((a.contract.match(/\d+/) || ['0'])[0], 10);
+        const numB = parseInt((b.contract.match(/\d+/) || ['0'])[0], 10);
         return numA - numB;
     });
-    
-    // 准备图表数据
-    const labels = contracts.map(c => c.contract);
-    const longData = contracts.map(c => c.long);
-    const shortData = contracts.map(c => c.short);
-    
-    // 计算跨期持仓：本合约多头 vs 他月空头，本合约空头 vs 他月多头
-    const crossLongData = contracts.map((current, index) => {
-        // 本合约多头 vs 其他合约空头
-        let otherShort = 0;
-        contracts.forEach((other, otherIndex) => {
-            if (index !== otherIndex) {
-                otherShort += other.short;
-            }
-        });
-        return Math.min(current.long, otherShort);
-    });
-    
-    const crossShortData = contracts.map((current, index) => {
-        // 本合约空头 vs 其他合约多头
-        let otherLong = 0;
-        contracts.forEach((other, otherIndex) => {
-            if (index !== otherIndex) {
-                otherLong += other.long;
-            }
-        });
-        return Math.min(current.short, otherLong);
-    });
-    
-    // 销毁旧图表
-    if (window.brokerCrossPeriodChartInstance) {
-        window.brokerCrossPeriodChartInstance.destroy();
+
+    if (contracts.length < 2) {
+        showNoData(canvasLong, '跨期对比至少需 2 个合约');
+        showNoData(canvasShort, '');
+        const summaryEl = document.getElementById('broker-cross-period-summary');
+        if (summaryEl) summaryEl.textContent = brokerName + '：请确保品种下有多个月份合约数据';
+        return;
     }
-    
-    // 创建新图表（横向柱状图）
-    window.brokerCrossPeriodChartInstance = new Chart(ctx, {
+
+    const contractSelect = document.getElementById('contract');
+    const selectedCode = (contractSelect && contractSelect.value || '').split('.').pop();
+    let base = contracts.find(c => c.contract === selectedCode || (selectedCode && (c.contract === selectedCode || c.contract.endsWith(selectedCode))));
+    if (!base) base = contracts.reduce((best, c) => (c.long + c.short) > (best.long + best.short) ? c : best);
+    const others = contracts.filter(c => c.contract !== base.contract);
+
+    const baseShort = contractShortName(base.contract);
+    const colorLong = '#dc2626';
+    const colorShort = '#16a34a';
+
+    const baseFull = fullContractName(base.contract);
+    // 左图：X 轴「rb2601多仓 vs rb2603空仓」…
+    const labelsLong = others.map(o => baseFull + '多仓 vs ' + fullContractName(o.contract) + '空仓');
+    const multiData = others.map(() => base.long);
+    const shortData = others.map(o => o.short);
+
+    // 右图：X 轴「rb2601空仓 vs rb2603多仓」…
+    const labelsShort = others.map(o => baseFull + '空仓 vs ' + fullContractName(o.contract) + '多仓');
+    const shortBaseData = others.map(() => base.short);
+    const longOtherData = others.map(o => o.long);
+
+    const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: true, position: 'top' },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        const v = ctx.parsed.y != null ? ctx.parsed.y : ctx.parsed.x;
+                        return (ctx.dataset.label || '') + ': ' + Number(v).toLocaleString() + ' 手';
+                    }
+                }
+            }
+        },
+        scales: {
+            x: { display: true, ticks: { maxRotation: 0, minRotation: 0 } },
+            y: { beginAtZero: true, ticks: { callback: v => Number(v).toLocaleString() } }
+        }
+    };
+
+    if (window.brokerCrossPeriodChartLongInstance) {
+        window.brokerCrossPeriodChartLongInstance.destroy();
+        window.brokerCrossPeriodChartLongInstance = null;
+    }
+    window.brokerCrossPeriodChartLongInstance = new Chart(canvasLong.getContext('2d'), {
         type: 'bar',
         data: {
-            labels: labels,
+            labels: labelsLong,
             datasets: [
-                {
-                    label: '本合约多头 vs 他月空头',
-                    data: crossLongData,
-                    backgroundColor: '#2563eb',
-                    borderColor: '#2563eb',
-                    borderWidth: 1
-                },
-                {
-                    label: '本合约空头 vs 他月多头',
-                    data: crossShortData,
-                    backgroundColor: '#16a34a',
-                    borderColor: '#16a34a',
-                    borderWidth: 1
-                }
+                { label: '多', data: multiData, backgroundColor: colorLong, borderColor: colorLong, borderWidth: 1 },
+                { label: '空', data: shortData, backgroundColor: colorShort, borderColor: colorShort, borderWidth: 1 }
             ]
         },
-        options: {
-            indexAxis: 'y', // 横向柱状图
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top'
-                },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            return context.dataset.label + ': ' + context.parsed.x.toLocaleString();
-                        }
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: function(value) {
-                            return value.toLocaleString();
-                        }
-                    }
-                }
-            }
-        }
+        options: commonOptions
     });
+
+    if (window.brokerCrossPeriodChartShortInstance) {
+        window.brokerCrossPeriodChartShortInstance.destroy();
+        window.brokerCrossPeriodChartShortInstance = null;
+    }
+    window.brokerCrossPeriodChartShortInstance = new Chart(canvasShort.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labelsShort,
+            datasets: [
+                { label: '空', data: shortBaseData, backgroundColor: colorShort, borderColor: colorShort, borderWidth: 1 },
+                { label: '多', data: longOtherData, backgroundColor: colorLong, borderColor: colorLong, borderWidth: 1 }
+            ]
+        },
+        options: commonOptions
+    });
+
+    const titleEl = document.getElementById('broker-cross-period-title');
+    if (titleEl) titleEl.textContent = brokerName + ' 跨期持仓对比图';
+
+    const summaryEl = document.getElementById('broker-cross-period-summary');
+    if (summaryEl) {
+        summaryEl.textContent = '本合约 ' + baseShort + '：多头 ' + base.long.toLocaleString() + ' 手，空头 ' + base.short.toLocaleString() + ' 手（日期：' + dateInput + '）';
+    }
 }
 
 // 页面加载时初始化

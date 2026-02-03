@@ -80,7 +80,7 @@
                     <div class="analysis-chart-card">
                         <div class="chart-header">
                             <div class="chart-header-left">
-                                <h2 id="trend-chart-title">合约多空持仓趋势 (前三月)</h2>
+                                <h2 id="trend-chart-title">合约多空持仓趋势</h2>
                             </div>
                             <div class="chart-header-right">
                                 <button class="range-btn" data-range="week" onclick="setTrendChartRange('week')">前一周</button>
@@ -90,6 +90,21 @@
                         </div>
                         <div class="chart-wrapper">
                             <canvas id="trendChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="analysis-chart-card">
+                        <div class="chart-header">
+                            <div class="chart-header-left">
+                                <h2 id="net-trend-chart-title">前5 / 前10 / 前20 净持仓趋势</h2>
+                            </div>
+                            <div class="chart-header-right">
+                                <button class="range-btn" data-range="week" onclick="setTrendChartRange('week')">前一周</button>
+                                <button class="range-btn" data-range="month" onclick="setTrendChartRange('month')">前一月</button>
+                                <button class="range-btn active" data-range="quarter" onclick="setTrendChartRange('quarter')">前三月</button>
+                            </div>
+                        </div>
+                        <div class="chart-wrapper">
+                            <canvas id="netPositionTrendChart"></canvas>
                         </div>
                     </div>
                     <div class="analysis-table-card">
@@ -136,10 +151,18 @@
                     </div>
                     <div class="broker-chart-card">
                         <div class="chart-header">
-                            <h2>跨期持仓分布图</h2>
+                            <h2 id="broker-cross-period-title">跨期持仓对比图</h2>
                         </div>
-                        <div class="chart-wrapper">
-                            <canvas id="brokerCrossPeriodChart"></canvas>
+                        <div id="broker-cross-period-summary" class="cross-period-summary"></div>
+                        <div class="cross-period-charts-row">
+                            <div class="chart-wrapper cross-period-half">
+                                <div class="chart-subtitle">本合约多仓 vs 他月空仓</div>
+                                <canvas id="brokerCrossPeriodChartLong"></canvas>
+                            </div>
+                            <div class="chart-wrapper cross-period-half">
+                                <div class="chart-subtitle">本合约空仓 vs 他月多仓</div>
+                                <canvas id="brokerCrossPeriodChartShort"></canvas>
+                            </div>
                         </div>
                     </div>
                 </div>

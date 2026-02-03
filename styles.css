@@ -858,6 +858,57 @@ body {
     height: 420px;
 }
 
+.cross-period-charts-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 24px;
+}
+
+.cross-period-charts-row .cross-period-half,
+.cross-period-charts-row .cross-period-full,
+.cross-period-charts-row .cross-period-net {
+    flex: 1;
+    min-width: 340px;
+    height: 380px;
+    padding: 0;
+}
+
+.cross-period-summary {
+    padding: 12px 24px;
+    font-size: 14px;
+    color: var(--kq-text-muted);
+    border-bottom: 1px solid var(--kq-border);
+}
+
+.cross-period-table-wrap {
+    padding: 16px 24px;
+    overflow-x: auto;
+}
+
+.cross-period-table-wrap table {
+    width: 100%;
+    font-size: 13px;
+    border-collapse: collapse;
+}
+
+.cross-period-table-wrap th,
+.cross-period-table-wrap td {
+    padding: 6px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--kq-border);
+}
+
+.cross-period-table-wrap th { color: var(--kq-text-muted); font-weight: 500; }
+.cross-period-table-wrap td.net-positive { color: var(--kq-negative); }
+.cross-period-table-wrap td.net-negative { color: var(--kq-positive); }
+
+.cross-period-charts-row .chart-subtitle {
+    font-size: 13px;
+    color: var(--kq-text-muted);
+    margin-bottom: 8px;
+}
+
 .broker-selector label {
     font-size: 14px;
     font-weight: 600;
