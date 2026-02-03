@@ -310,6 +310,30 @@ body {
     height: 380px;
 }
 
+/* 按会员跨期净持仓图：固定可视高度 + 内部滚动，单行更大不挤 */
+.cross-period-chart-scroll {
+    max-height: 520px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin-bottom: 1rem;
+    padding: 0 4px 0 0;
+}
+.cross-period-chart-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+.cross-period-chart-scroll::-webkit-scrollbar-thumb {
+    background: var(--kq-border);
+    border-radius: 4px;
+}
+#cross-period-broker-chart-wrapper {
+    min-height: 400px;
+    padding: 20px 24px;
+    /* height 由 JS 按行数动态设置 */
+}
+#cross-period-broker-chart-wrapper canvas {
+    display: block;
+}
+
 .chart-wrapper-sm {
     height: 320px;
 }
@@ -326,7 +350,7 @@ body {
 }
 
 .table-wrapper-scroll {
-    max-height: 420px;
+    max-height: 520px; /* 按会员跨期表格稍微放大一点，滚动区域更高 */
     overflow: auto;
 }
 

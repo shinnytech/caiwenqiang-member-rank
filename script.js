@@ -4,6 +4,7 @@ let allData = [];          // 全市场合约+期货公司数据（用于持仓�
 let brokerDataAll = [];    // 当前选中期货公司的专用数据（来自带期货公司后缀的CSV）
 let trendChart = null;           // 趋势图表实例
 let netPositionTrendChart = null; // 前5/前10/前20净持仓趋势图实例
+let crossPeriodBrokerChart = null; // 按会员跨期净持仓分段堆叠条形图
 // 持仓排行榜页：合约多空持仓趋势图时间范围 'week'|'month'|'quarter'
 let trendChartRange = 'quarter';
 // 公司持仓分析页：持仓趋势图时间范围 'week'|'month'|'quarter'
@@ -922,7 +923,8 @@ function renderAnalysisCharts() {
     
     // 跨期净持仓表格（按合约汇总）
     renderCrossPeriodTable();
-    // 按会员跨期净持仓表（会员 x 各合约净多仓/净空仓）
+    // 按会员跨期净持仓：分段堆叠条形图 + 明细表
+    renderCrossPeriodBrokerChart();
     renderCrossPeriodBrokerTable();
 }
 
@@ -1572,26 +1574,18 @@ function renderCrossPeriodTable() {
     document.getElementById('cross-period-table').innerHTML = tableHTML;
 }
 
-// 按会员跨期净持仓表：行=会员简称，列=各合约的净多仓/净空仓
-function renderCrossPeriodBrokerTable() {
-    const container = document.getElementById('cross-period-broker-table');
-    if (!container) return;
+// 按会员跨期净持仓：统一数据准备，返回 { brokerList, symbolList, matrix, toShortSymbol } 或 null
+function getCrossPeriodBrokerData() {
     let dateInput = document.getElementById('date').value;
     if (!dateInput && allData.length > 0) {
         const latest = findLatestDateForProduct();
         if (latest) dateInput = latest;
     }
-    if (!dateInput) {
-        container.innerHTML = '<div class="loading">请选择日期</div>';
-        return;
-    }
+    if (!dateInput) return null;
     const dateStr = dateInput.replace(/-/g, '');
     const rowDateYmd = (dt) => (dt && typeof dt === 'string') ? (dt.length >= 8 ? dt.substring(0, 8) : dt) : '';
     const rows = allData.filter(row => rowDateYmd(row.datetime) === dateStr);
-    if (rows.length === 0) {
-        container.innerHTML = '<div class="loading">暂无数据</div>';
-        return;
-    }
+    if (rows.length === 0) return { brokerList: [], symbolList: [], matrix: new Map(), toShortSymbol: s => (s && s.indexOf('.') >= 0) ? s.split('.')[1] : s };
     const brokerSymbolMap = new Map();
     rows.forEach(row => {
         const key = `${row.broker}_${row.symbol}`;
@@ -1630,6 +1624,23 @@ function renderCrossPeriodBrokerTable() {
         if (!matrix.has(item.broker)) matrix.set(item.broker, new Map());
         matrix.get(item.broker).set(item.symbol, { netLong, netShort });
     });
+    return { brokerList, symbolList, matrix, toShortSymbol };
+}
+
+// 按会员跨期净持仓表：行=会员简称，列=各合约的净多仓/净空仓
+function renderCrossPeriodBrokerTable() {
+    const container = document.getElementById('cross-period-broker-table');
+    if (!container) return;
+    const data = getCrossPeriodBrokerData();
+    if (!data) {
+        container.innerHTML = '<div class="loading">请选择日期</div>';
+        return;
+    }
+    const { brokerList, symbolList, matrix, toShortSymbol } = data;
+    if (brokerList.length === 0) {
+        container.innerHTML = '<div class="loading">暂无数据</div>';
+        return;
+    }
     let html = '<table class="cross-period-table cross-period-broker-table"><thead><tr><th>会员简称</th>';
     symbolList.forEach(sym => {
         const shortSym = toShortSymbol(sym);
@@ -1649,6 +1660,130 @@ function renderCrossPeriodBrokerTable() {
     });
     html += '</tbody></table>';
     container.innerHTML = html;
+}
+
+// 按会员跨期净持仓：分段堆叠条形图，每行 = 一家公司 + 一个合约（不同合约各自一行）
+function renderCrossPeriodBrokerChart() {
+    const canvas = document.getElementById('crossPeriodBrokerChart');
+    const wrapper = document.getElementById('cross-period-broker-chart-wrapper');
+    if (!canvas || !wrapper) return;
+    const data = getCrossPeriodBrokerData();
+    if (crossPeriodBrokerChart) {
+        crossPeriodBrokerChart.destroy();
+        crossPeriodBrokerChart = null;
+    }
+    const scrollEl = document.getElementById('cross-period-broker-chart-scroll');
+    if (!data || !data.brokerList.length || !data.symbolList.length) {
+        wrapper.style.display = 'none';
+        if (scrollEl) scrollEl.style.display = 'none';
+        return;
+    }
+    wrapper.style.display = 'block';
+    if (scrollEl) scrollEl.style.display = 'block';
+    const { brokerList, symbolList, matrix, toShortSymbol } = data;
+    const TOP_BROKERS = 20;
+    const brokerTotal = new Map();
+    brokerList.forEach(broker => {
+        let total = 0;
+        const m = matrix.get(broker);
+        if (m) symbolList.forEach(sym => { const c = m.get(sym); if (c) total += c.netLong + c.netShort; });
+        brokerTotal.set(broker, total);
+    });
+    const sortedBrokers = brokerList.slice().sort((a, b) => (brokerTotal.get(b) || 0) - (brokerTotal.get(a) || 0));
+    const topBrokers = sortedBrokers.slice(0, TOP_BROKERS);
+    // 每行 = 一个(公司, 合约)；标签：同公司只首行显示公司名，其余行只显示合约（颜色已区分）
+    const rowCount = topBrokers.length * symbolList.length;
+    const ROW_HEIGHT_PX = 28;
+    const labels = [];
+    for (let bi = 0; bi < topBrokers.length; bi++) {
+        for (let si = 0; si < symbolList.length; si++) {
+            const symShort = toShortSymbol(symbolList[si]);
+            labels.push(si === 0 ? topBrokers[bi] + ' · ' + symShort : '\u2007\u2007' + symShort);
+        }
+    }
+    wrapper.style.height = (rowCount * ROW_HEIGHT_PX) + 'px';
+    wrapper.style.minHeight = wrapper.style.height;
+    const colorPairs = [
+        { short: '#b91c1c', long: '#fecaca' },
+        { short: '#1d4ed8', long: '#bfdbfe' },
+        { short: '#047857', long: '#bbf7d0' },
+        { short: '#92400e', long: '#fed7aa' },
+        { short: '#6b21a8', long: '#e9d5ff' },
+        { short: '#0369a1', long: '#bae6fd' },
+        { short: '#15803d', long: '#bbf7d0' }
+    ];
+    const datasets = [];
+    symbolList.forEach((sym, symIdx) => {
+        const shortLabel = toShortSymbol(sym) + ' 净空';
+        const longLabel = toShortSymbol(sym) + ' 净多';
+        const shortData = new Array(rowCount).fill(0);
+        const longData = new Array(rowCount).fill(0);
+        topBrokers.forEach((b, bi) => {
+            const cell = matrix.get(b) && matrix.get(b).get(sym);
+            const idx = bi * symbolList.length + symIdx;
+            if (cell) {
+                shortData[idx] = -(cell.netShort || 0);
+                longData[idx] = cell.netLong || 0;
+            }
+        });
+        const pair = colorPairs[symIdx % colorPairs.length];
+        datasets.push({
+            label: shortLabel,
+            data: shortData,
+            stack: 'short',
+            backgroundColor: pair.short,
+            barThickness: 18
+        });
+        datasets.push({
+            label: longLabel,
+            data: longData,
+            stack: 'long',
+            backgroundColor: pair.long,
+            barThickness: 18
+        });
+    });
+    crossPeriodBrokerChart = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: { padding: { top: 8, right: 8, bottom: 8, left: 4 } },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { boxWidth: 14, font: { size: 12 } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            const v = ctx.raw;
+                            if (v === 0) return null;
+                            const label = (ctx.dataset.label || '') + ': ' + (v >= 0 ? v.toLocaleString() : '(' + (-v).toLocaleString() + ')');
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    title: { display: true, text: '净持仓（左净空 / 右净多）', font: { size: 13 } },
+                    ticks: { font: { size: 12 } }
+                },
+                y: {
+                    stacked: true,
+                    ticks: { font: { size: 12 }, maxRotation: 0, autoSkip: false },
+                    categoryPercentage: 0.75,
+                    barPercentage: 0.88
+                }
+            }
+        }
+    });
 }
 
 // 页面切换函数
