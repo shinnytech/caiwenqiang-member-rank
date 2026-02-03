@@ -31,6 +31,8 @@ SYMBOLS = [
     "SHFE.rb2601",
     "SHFE.rb2603",
     "SHFE.rb2605",
+    "SHFE.rb2606",
+    "SHFE.rb2607",
     # 可以添加更多合约，例如：
     # "SHFE.cu2401",
     # "DCE.m2401",
@@ -44,10 +46,15 @@ DAYS = 100  # 返回最近N个交易日的数据，必须 >= 1
 # 如果为 None，则自动使用上一个交易日作为开始日期（排除当日）
 START_DT = None  # 例如: date(2024, 1, 1) 或 None
 
-# 【可选】期货公司名称
-# 如果填写，则只查询该期货公司的排名数据
-# 如果为 None，则返回所有期货公司的排名数据
-BROKER = "D东证期货"  # 例如: "Z中信期货" 或 None
+# 【可选】期货公司列表（一次运行为多个公司分别拉取并保存）
+# 空列表 [] 或 [None]：查询所有期货公司，保存到 SHFE_rb.csv
+# 非空列表：按公司分别查询，每个公司保存到 SHFE_rb_公司名.csv
+BROKERS = [
+    "D东证期货",
+    "G国泰君安",
+    "Z中信期货",
+    # 可继续添加: "X新湖期货", "J建信期货", ...
+]
 
 # ============================================================================
 # 以下代码无需修改
@@ -139,6 +146,9 @@ def merge_and_deduplicate(old_df, new_df):
             print(f"  [WARN] 警告：数据中缺少列 '{col}'，无法去重")
             return combined
     
+    # 统一 datetime 为字符串 YYYYMMDD，避免 str/int 混用导致排序报错
+    if 'datetime' in combined.columns:
+        combined['datetime'] = combined['datetime'].astype(str).str.replace('-', '').str[:8]
     # 按日期排序，确保最新的数据在后面
     if 'datetime' in combined.columns:
         combined = combined.sort_values('datetime', ascending=True)
@@ -154,7 +164,10 @@ def query_symbol_data(api, symbol, ranking_types, days, start_dt, broker):
     查询单个合约的所有排名数据
     """
     all_dfs = []
-    
+    days = int(days)  # tqsdk 要求 days 为 int
+    if days < 1:
+        days = 1
+
     for ranking_type, type_name in ranking_types:
         try:
             print(f"    正在查询 {symbol} 的 {type_name}...")
@@ -165,9 +178,9 @@ def query_symbol_data(api, symbol, ranking_types, days, start_dt, broker):
                 start_dt=start_dt,
                 broker=broker
             )
-            
+            # 转为普通 DataFrame，避免 TqSymbolRankingDataFrame 子类在 concat 时出问题
+            df = pd.DataFrame(df.copy())
             if len(df) > 0:
-                # 添加排名类型标识列
                 df['ranking_type'] = ranking_type
                 df['ranking_type_name'] = type_name
                 all_dfs.append(df)
@@ -176,10 +189,11 @@ def query_symbol_data(api, symbol, ranking_types, days, start_dt, broker):
                 print(f"      [WARN] {type_name} 查询完成，但无数据")
         except Exception as e:
             print(f"      [FAIL] {type_name} 查询失败: {e}")
-    
+            import traceback
+            traceback.print_exc()
+
     if all_dfs:
         combined = pd.concat(all_dfs, ignore_index=True)
-        # 重新排列列的顺序
         cols = ['ranking_type', 'ranking_type_name'] + \
                [col for col in combined.columns if col not in ['ranking_type', 'ranking_type_name']]
         combined = combined[cols]
@@ -233,8 +247,12 @@ def main():
     print(f"品种数量: {len(symbols_by_product)}")
     print(f"查询天数: {DAYS}")
     print(f"开始日期: {actual_start_dt}")
-    if BROKER:
-        print(f"期货公司: {BROKER}")
+    # 空列表或未配置则视为“全市场”；否则按列表中的公司逐个查询
+    broker_list = BROKERS if (BROKERS is not None and len(BROKERS) > 0) else [None]
+    if broker_list == [None]:
+        print("期货公司: 全市场（所有公司）")
+    else:
+        print(f"期货公司: 共 {len(broker_list)} 家 — {broker_list}")
     print()
     
     # 定义三种排名类型
@@ -249,63 +267,57 @@ def main():
         # 创建API实例
         api = TqApi(auth=TqAuth(USERNAME, PASSWORD))
         
-        # 按品种处理数据
-        for (exchange, product), symbols in symbols_by_product.items():
-            print(f"\n{'='*60}")
-            print(f"处理品种: {exchange}.{product} (共 {len(symbols)} 个合约)")
-            print(f"{'='*60}")
+        # 按期货公司循环（None=全市场，否则按列表逐家）
+        for broker in broker_list:
+            if broker is not None:
+                print(f"\n{'#'*60}")
+                print(f"# 期货公司: {broker}")
+                print(f"{'#'*60}")
             
-            # 生成文件名
-            csv_filename = get_csv_filename(exchange, product, BROKER)
-            
-            # 加载现有数据
-            existing_df = load_existing_data(csv_filename)
-            
-            # 存储该品种所有合约的新数据
-            product_new_data = []
-            
-            # 查询每个合约的数据
-            for symbol in symbols:
-                print(f"\n  查询合约: {symbol}")
-                symbol_df = query_symbol_data(
-                    api, symbol, ranking_types, DAYS, actual_start_dt, BROKER
-                )
+            # 按品种处理数据
+            for (exchange, product), symbols in symbols_by_product.items():
+                print(f"\n{'='*60}")
+                print(f"处理品种: {exchange}.{product} (共 {len(symbols)} 个合约)" + (f" — {broker}" if broker else ""))
+                print(f"{'='*60}")
                 
-                if len(symbol_df) > 0:
-                    product_new_data.append(symbol_df)
-            
-            # 合并该品种所有合约的数据
-            if product_new_data:
-                new_df = pd.concat(product_new_data, ignore_index=True)
-                print(f"\n  {exchange}.{product} 新数据: {len(new_df)} 条记录")
+                csv_filename = get_csv_filename(exchange, product, broker)
+                existing_df = load_existing_data(csv_filename)
+                product_new_data = []
                 
-                # 与现有数据合并并去重
-                merged_df = merge_and_deduplicate(existing_df, new_df)
+                for symbol in symbols:
+                    print(f"\n  查询合约: {symbol}")
+                    symbol_df = query_symbol_data(
+                        api, symbol, ranking_types, DAYS, actual_start_dt, broker
+                    )
+                    if len(symbol_df) > 0:
+                        product_new_data.append(symbol_df)
                 
-                # 统计信息
-                old_count = len(existing_df)
-                new_count = len(new_df)
-                merged_count = len(merged_df)
-                added_count = merged_count - old_count
-                
-                # 保存为CSV
-                merged_df.to_csv(csv_filename, index=False, encoding='utf-8-sig')
-                
-                print(f"\n  [OK] 数据已保存到: {os.path.abspath(csv_filename)}")
-                print(f"    原有数据: {old_count} 条")
-                print(f"    新增数据: {new_count} 条")
-                print(f"    合并后总计: {merged_count} 条")
-                print(f"    实际新增: {added_count} 条（去重后）")
-            else:
-                print(f"\n  [WARN] {exchange}.{product} 没有新数据")
-                if len(existing_df) > 0:
-                    print(f"    保留现有数据: {len(existing_df)} 条")
+                if product_new_data:
+                    new_df = pd.concat(product_new_data, ignore_index=True)
+                    print(f"\n  {exchange}.{product} 新数据: {len(new_df)} 条记录")
+                    merged_df = merge_and_deduplicate(existing_df, new_df)
+                    old_count = len(existing_df)
+                    new_count = len(new_df)
+                    merged_count = len(merged_df)
+                    added_count = merged_count - old_count
+                    if 'datetime' in merged_df.columns:
+                        merged_df['datetime'] = merged_df['datetime'].astype(str).str.replace('-', '').str[:8]
+                    merged_df.to_csv(csv_filename, index=False, encoding='utf-8-sig')
+                    print(f"\n  [OK] 数据已保存到: {os.path.abspath(csv_filename)}")
+                    print(f"    原有数据: {old_count} 条")
+                    print(f"    新增数据: {new_count} 条")
+                    print(f"    合并后总计: {merged_count} 条")
+                    print(f"    实际新增: {added_count} 条（去重后）")
+                else:
+                    print(f"\n  [WARN] {exchange}.{product} 没有新数据")
+                    if len(existing_df) > 0:
+                        print(f"    保留现有数据: {len(existing_df)} 条")
         
         print()
         print("=" * 60)
         print("查询完成！")
         print("=" * 60)
-        print(f"共处理 {len(symbols_by_product)} 个品种")
+        print(f"共处理 {len(symbols_by_product)} 个品种, {len(broker_list)} 个期货公司/全市场")
         print()
         
     except Exception as e:
